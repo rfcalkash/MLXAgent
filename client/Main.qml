@@ -125,27 +125,89 @@ ApplicationWindow {
             width: chatList.width
             height: bubble.height
 
-            property bool isUser: modelData.role === "user"
+            required property int index
+            required property string role
+            required property string content
+            required property string think
+            required property string warning
+
+            // Локальное UI-состояние карточки
+            property bool thinkExpanded: false
+
+            // Вычисляемые свойства
+            property bool isUser: role === "user"
+            property bool hasThink: think.length > 0
+            property bool hasWarning: warning.length > 0
+            property bool isStreaming: !isUser
+                                       && index === chatList.count - 1
+                                       && api.serverStatus === "GENERATING"
 
             Rectangle {
                 id: bubble
-                width: Math.min(parent.width * 0.8, msgText.implicitWidth + 24)
-                height: msgText.implicitHeight + 20
+                width: Math.min(parent.width * 0.85, Math.max(contentCol.implicitWidth + 24, 120))
+                height: contentCol.implicitHeight + 20
                 radius: 12
-                color: isUser ? "#2b5278" : "#333333"
+                color: isUser ? "#2b5278" : "#2d2d2d"
                 anchors.right: isUser ? parent.right : undefined
                 anchors.left: isUser ? undefined : parent.left
 
-                Text {
-                    id: msgText
+                ColumnLayout {
+                    id: contentCol
                     anchors.fill: parent
                     anchors.margins: 10
-                    text: modelData.content
-                    color: "white"
-                    wrapMode: Text.WordWrap
+                    spacing: 6
+
+                    Button {
+                        visible: !isUser && hasThink
+                        text: thinkExpanded ? "▼ Скрыть рассуждения" : "▶ Ход мыслей..."
+                        flat: true
+                        font.pixelSize: 12
+                        Layout.preferredHeight: 24
+                        onClicked: thinkExpanded = !thinkExpanded
+                    }
+
+                    Rectangle {
+                        visible: !isUser && hasThink && thinkExpanded
+                        Layout.fillWidth: true
+                        implicitHeight: thinkText.implicitHeight + 12
+                        color: "#1e1e1e"
+                        radius: 6
+
+                        Text {
+                            id: thinkText
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            text: think
+                            color: "#aaaaaa"
+                            font.pixelSize: 12
+                            font.italic: true
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: {
+                            if (content.length > 0) return content
+                            if (isStreaming) return hasThink ? "Формулирую ответ..." : "Думаю..."
+                            return ""
+                        }
+                        visible: text.length > 0
+                        color: content.length > 0 ? "white" : "#888888"
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        visible: hasWarning
+                        text: "⚠ " + warning
+                        color: "#ff9800"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
                 }
             }
         }
+
     }
 
     // Нижняя панель ввода

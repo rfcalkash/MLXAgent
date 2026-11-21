@@ -6,12 +6,61 @@ ApiClient::ApiClient(QObject* parent)
     : QObject(parent)
     , m_nam(new QNetworkAccessManager(this))
     , m_pollTimer(new QTimer(this))
+    , m_chatModel(new ChatModel(this))
 {
-    m_pollTimer->setInterval(300);
+    m_pollTimer->setInterval(1000);
     connect(m_pollTimer, &QTimer::timeout, this, &ApiClient::pollCurrentTask);
-
-    // Автоматически обновляем данные при смене URL сервера
     connect(this, &ApiClient::serverUrlChanged, this, &ApiClient::refreshAll);
+}
+
+void ApiClient::sendMessage(const QString& text)
+{
+    if (text.trimmed().isEmpty())
+        return;
+
+    m_chatModel->appendMessage({ .role = "user", .content = text });
+    const QJsonArray msgArray = m_chatModel->toApiMessages();
+    m_chatModel->appendMessage({ .role = "assistant" });
+
+    send("POST", "/chat", { { "messages", msgArray }, { "max_tokens", 1024 } }, [this](const QJsonObject& res) {
+        startTaskPolling(res["task_id"].toString());
+    });
+}
+
+void ApiClient::pollCurrentTask()
+{
+    if (m_currentTaskId.isEmpty()) {
+        m_pollTimer->stop();
+        return;
+    }
+
+    send("GET", "/tasks/" + m_currentTaskId, { }, [this](const QJsonObject& obj) {
+        const QString status = obj["status"].toString();
+        const QString type = obj["type"].toString();
+        const QJsonObject result = obj["result"].toObject();
+
+        if (type == "generate" && (status == "running" || status == "completed")) {
+            const QString warning = (status == "completed" && !obj["error"].isNull())
+                ? obj["error"].toString()
+                : QString();
+
+            m_chatModel->updateLastAssistantMessage(
+                result["think"].toString(),
+                result["answer"].toString(),
+                warning);
+        }
+
+        if (status == "completed") {
+            m_pollTimer->stop();
+            m_currentTaskId.clear();
+            refreshAll();
+        } else if (status == "failed") {
+            m_pollTimer->stop();
+            m_currentTaskId.clear();
+            emit errorOccurred("Ошибка задачи: " + obj["error"].toString());
+            refreshAll();
+        }
+    });
 }
 
 bool ApiClient::isBusy() const
@@ -140,28 +189,9 @@ void ApiClient::unloadModel()
     });
 }
 
-void ApiClient::sendMessage(const QString& text)
-{
-    if (text.trimmed().isEmpty())
-        return;
-
-    m_messages.append(QVariantMap { { "role", "user" }, { "content", text } });
-    emit messagesChanged();
-
-    QJsonArray msgArray;
-    foreach (const auto& m, m_messages) {
-        msgArray.append(QJsonObject::fromVariantMap(m.toMap()));
-    }
-
-    send("POST", "/chat", { { "messages", msgArray }, { "max_tokens", 1024 } }, [this](const QJsonObject& res) {
-        startTaskPolling(res["task_id"].toString());
-    });
-}
-
 void ApiClient::clearChat()
 {
-    m_messages.clear();
-    emit messagesChanged();
+    m_chatModel->clear();
 }
 
 void ApiClient::startTaskPolling(const QString& taskId)
@@ -169,38 +199,4 @@ void ApiClient::startTaskPolling(const QString& taskId)
     m_currentTaskId = taskId;
     fetchState();
     m_pollTimer->start();
-}
-
-void ApiClient::pollCurrentTask()
-{
-    if (m_currentTaskId.isEmpty()) {
-        m_pollTimer->stop();
-        return;
-    }
-
-    send("GET", "/tasks/" + m_currentTaskId, { }, [this](const QJsonObject& obj) {
-        const QString status = obj["status"].toString();
-
-        if (status == "completed") {
-            m_pollTimer->stop();
-            m_currentTaskId.clear();
-            handleTaskCompleted(obj["type"].toString(), obj["result"].toObject());
-            refreshAll();
-        } else if (status == "failed") {
-            m_pollTimer->stop();
-            m_currentTaskId.clear();
-            emit errorOccurred("Ошибка задачи: " + obj["error"].toString());
-            refreshAll();
-        }
-    });
-}
-
-void ApiClient::handleTaskCompleted(const QString& type, const QJsonObject& result)
-{
-    if (type == "generate") {
-        m_messages.append(QVariantMap {
-            { "role", "assistant" },
-            { "content", result["response"].toString() } });
-        emit messagesChanged();
-    }
 }

@@ -10,25 +10,25 @@
 #include <QVariantList>
 #include <functional>
 
+#include "ChatModel.h"
 #include "PropertyMacros.h"
 
 class ApiClient : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
-    // Свойства теперь занимают по одной строке
     RW_REF_PROPERTY_DEF(QString, serverUrl, setServerUrl, "http://127.0.0.1:8000")
     RO_REF_PROPERTY_DEF(QString, serverStatus, "OFFLINE")
     RO_REF_PROPERTY(QString, activeModel)
     RO_REF_PROPERTY(QVariantList, models)
-    RO_REF_PROPERTY(QVariantList, messages)
 
-    // Вычисляемое свойство (оставляем классическим Q_PROPERTY)
+    Q_PROPERTY(ChatModel* chatModel READ chatModel CONSTANT)
     Q_PROPERTY(bool isBusy READ isBusy NOTIFY serverStatusChanged)
 
 public:
     explicit ApiClient(QObject* parent = nullptr);
 
+    ChatModel* chatModel() const { return m_chatModel; }
     bool isBusy() const;
 
     Q_INVOKABLE void refreshAll();
@@ -60,9 +60,9 @@ private:
     void fetchState();
     void fetchModels();
     void startTaskPolling(const QString& taskId);
-    void handleTaskCompleted(const QString& type, const QJsonObject& result);
 
     QNetworkAccessManager* m_nam;
     QTimer* m_pollTimer;
+    ChatModel* m_chatModel;
     QString m_currentTaskId;
 };
