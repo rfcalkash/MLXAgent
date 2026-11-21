@@ -192,3 +192,4 @@ cython_debug/
 .cursorindexingignore
 .DS_Store
 /client/.qtcreator
+.DS_Store
