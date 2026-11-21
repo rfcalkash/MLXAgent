@@ -193,3 +193,5 @@ cython_debug/
 .DS_Store
 /client/.qtcreator
 .DS_Store
+server/uv.lock
+server/.python-version
