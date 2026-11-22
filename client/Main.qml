@@ -118,7 +118,7 @@ ApplicationWindow {
         anchors.margins: 10
         spacing: 10
         clip: true
-        model: api.messages
+        model: api.chatModel
         onCountChanged: positionViewAtEnd()
 
         delegate: Item {
@@ -182,6 +182,7 @@ ApplicationWindow {
                             font.pixelSize: 12
                             font.italic: true
                             wrapMode: Text.WordWrap
+                            textFormat: Text.MarkdownText
                         }
                     }
 
@@ -195,6 +196,7 @@ ApplicationWindow {
                         visible: text.length > 0
                         color: content.length > 0 ? "white" : "#888888"
                         wrapMode: Text.WordWrap
+                        textFormat: Text.MarkdownText
                     }
 
                     Label {

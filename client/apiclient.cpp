@@ -13,6 +13,8 @@ ApiClient::ApiClient(QObject* parent)
     connect(this, &ApiClient::serverUrlChanged, this, &ApiClient::refreshAll);
 }
 
+ChatModel* ApiClient::chatModel() const { return m_chatModel; }
+
 void ApiClient::sendMessage(const QString& text)
 {
     if (text.trimmed().isEmpty())
@@ -22,7 +24,7 @@ void ApiClient::sendMessage(const QString& text)
     const QJsonArray msgArray = m_chatModel->toApiMessages();
     m_chatModel->appendMessage({ .role = "assistant" });
 
-    send("POST", "/chat", { { "messages", msgArray }, { "max_tokens", 1024 } }, [this](const QJsonObject& res) {
+    send("POST", "/chat", { { "messages", msgArray }, { "max_tokens", 16000 } }, [this](const QJsonObject& res) {
         startTaskPolling(res["task_id"].toString());
     });
 }

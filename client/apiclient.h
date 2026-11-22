@@ -28,7 +28,7 @@ class ApiClient : public QObject {
 public:
     explicit ApiClient(QObject* parent = nullptr);
 
-    ChatModel* chatModel() const { return m_chatModel; }
+    ChatModel* chatModel() const;
     bool isBusy() const;
 
     Q_INVOKABLE void refreshAll();
