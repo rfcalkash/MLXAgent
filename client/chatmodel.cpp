@@ -26,6 +26,8 @@ QVariant ChatModel::data(const QModelIndex& index, int role) const
         return msg.think;
     case WarningRole:
         return msg.warning;
+    case AttachmentsRole:
+        return msg.attachments;
     default:
         return { };
     }
@@ -37,7 +39,8 @@ QHash<int, QByteArray> ChatModel::roleNames() const
         { RoleRole, "role" },
         { ContentRole, "content" },
         { ThinkRole, "think" },
-        { WarningRole, "warning" }
+        { WarningRole, "warning" },
+        { AttachmentsRole, "attachments" }
     };
     return roles;
 }
@@ -83,11 +86,25 @@ QJsonArray ChatModel::toApiMessages() const
 {
     QJsonArray arr;
     for (const auto& msg : m_items) {
-        if (!msg.content.trimmed().isEmpty()) {
-            arr.append(QJsonObject {
-                { "role", msg.role },
-                { "content", msg.content } });
+        if (msg.content.trimmed().isEmpty() && msg.attachments.isEmpty())
+            continue;
+
+        QJsonArray attArr;
+        for (const auto& a : msg.attachments) {
+            const auto map = a.toMap();
+            attArr.append(QJsonObject {
+                { "type", map["type"].toString() },
+                { "file_id", map["file_id"].toString() } });
         }
+
+        QJsonObject obj {
+            { "role", msg.role },
+            { "content", msg.content }
+        };
+        if (!attArr.isEmpty()) {
+            obj["attachments"] = attArr;
+        }
+        arr.append(obj);
     }
     return arr;
 }

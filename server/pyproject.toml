@@ -9,6 +9,9 @@ dependencies = [
     "huggingface-hub>=2.4.0",
     "mlx>=0.32.4",
     "mlx-lm>=0.32.2",
+    "mlx-vlm>=0.8.0",
+    "pillow>=13.0.0",
     "pydantic>=2.14.4",
+    "python-multipart>=0.0.34",
     "uvicorn>=0.54.0",
 ]

@@ -2,6 +2,7 @@
 
 #include <QAbstractListModel>
 #include <QJsonArray>
+#include <QVariantList>
 #include <QVector>
 
 struct ChatMessage {
@@ -9,6 +10,7 @@ struct ChatMessage {
     QString content;
     QString think;
     QString warning;
+    QVariantList attachments;
 };
 
 class ChatModel : public QAbstractListModel {
@@ -19,7 +21,8 @@ public:
         RoleRole = Qt::UserRole + 1,
         ContentRole,
         ThinkRole,
-        WarningRole
+        WarningRole,
+        AttachmentsRole
     };
 
     explicit ChatModel(QObject* parent = nullptr);
