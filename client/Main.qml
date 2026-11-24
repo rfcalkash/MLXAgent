@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import MlxClient
+import QtQuick.Controls.Material
 
 ApplicationWindow {
     id: window
@@ -10,6 +11,20 @@ ApplicationWindow {
     height: 650
     visible: true
     title: "MLX Local Client"
+
+    readonly property bool isDark: Material.theme === Material.Dark
+
+    Material.theme: Material.System
+
+    // База с едва уловимым тёплым подтоном (слоновая кость днём, глубокий уголь ночью)
+    Material.background: isDark ? "#121413" : "#F7F6F2"
+    Material.foreground: isDark ? "#E6E4DF" : "#1C1E1D"
+
+    // Primary: Благородный изумрудно-хвойный
+    Material.primary: isDark ? "#4DB6AC" : "#1B5E55"
+
+    // Accent: Дорогой янтарно-золотой / терракотовый (противоположен на цветовом круге)
+    Material.accent: isDark ? "#E6A15C" : "#C86D2D"
 
     AppContext {
         id: app
@@ -168,16 +183,17 @@ ApplicationWindow {
         Label {
             text: app.models.serverStatus + (app.models.textOnlyMode && app.models.serverStatus === "LOADED" ? " [TXT]" : "")
             font.bold: true
-            color: app.models.serverStatus === "LOADED" ? "green" :
-                                                          app.models.serverStatus === "OFFLINE" ? "red" : "orange"
+            color: app.models.serverStatus === "LOADED" ? Material.color(Material.Green) :
+                                                          (app.models.serverStatus === "OFFLINE" ? Material.color(Material.Red) : Material.color(Material.Orange))
         }
     }
 
     header: ToolBar {
         id: headerBar
+        Material.background: window.Material.background
         clip: true
-        property bool expanded: false
         height: (optionsPane.visible ? optionsPane.implicitHeight : statusPane.implicitHeight) + 12
+        property bool expanded: false        
         Behavior on height { NumberAnimation { duration: 200 } }
 
         RowLayout {
@@ -189,10 +205,12 @@ ApplicationWindow {
             RoundButton {
                 text: "☰"
                 onClicked: chatsDrawer.open()
+                flat: true
             }
             RoundButton {
                 text: headerBar.expanded ? "▲" : "▼"
                 onClicked: headerBar.expanded = !headerBar.expanded
+                flat: true
             }
             ColumnLayout {
                 Label {
@@ -219,10 +237,12 @@ ApplicationWindow {
                 RoundButton {
                     text: "☰"
                     onClicked: chatsDrawer.open()
+                    flat: true
                 }
                 RoundButton {
                     text: headerBar.expanded ? "▲" : "▼"
                     onClicked: headerBar.expanded = !headerBar.expanded
+                    flat: true
                 }
                 TextField {
                     id: urlField
@@ -323,6 +343,21 @@ ApplicationWindow {
             property bool isStreaming: !isUser
                                        && index === chatList.count - 1
                                        && app.models.serverStatus === "GENERATING"
+
+            function fixWidth(){
+                thinkText.wrapMode = Text.NoWrap
+                contentText.wrapMode = Text.NoWrap
+                Qt.callLater(() => {
+                    thinkText.wrapMode = Text.WordWrap
+                    contentText.wrapMode = Text.WordWrap
+                })
+            }
+            onIsStreamingChanged: {
+                if (isStreaming) chatList.positionViewAtEnd()
+                else {
+                    fixWidth()
+                }
+            }
             Rectangle {
                 id: bubble
                 width: Math.min(parent.width * 0.85, Math.max(contentCol.implicitWidth + 24, 140))
@@ -380,6 +415,7 @@ ApplicationWindow {
                         }
                     }
                     TextArea {
+                        id: contentText
                         Layout.fillWidth: true
                         text: {
                             if (content.length > 0) return app.chat.formatContent(content, color, font.pixelSize)
@@ -393,6 +429,7 @@ ApplicationWindow {
                         readOnly: true
                         selectByMouse: true
                         selectByKeyboard: true
+
                     }
                     Label {
                         visible: hasWarning
@@ -407,6 +444,7 @@ ApplicationWindow {
     }
     footer: ToolBar {
         id: footerBar
+        Material.background: window.Material.background
         height: Math.min(footerCol.implicitHeight + 12, parent.height * 0.45)
         property bool hasUploadingFiles: app.chat.activeDraftAttachments.some(item => item.status === "uploading")
         ColumnLayout {
