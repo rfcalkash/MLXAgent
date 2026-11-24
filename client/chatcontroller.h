@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QColor>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <functional>
 
 #include "ChatModel.h"
 #include "PropertyMacros.h"
@@ -17,15 +19,20 @@ class ChatController : public QObject {
     RO_REF_PROPERTY(QVariantList, chats)
     RO_REF_PROPERTY(QString, activeChatId)
 
+    Q_PROPERTY(QString activeChatTitle READ activeChatTitle NOTIFY activeChatTitleChanged)
+
     Q_PROPERTY(QVariantList activeDraftAttachments READ activeDraftAttachments NOTIFY activeDraftAttachmentsChanged)
     Q_PROPERTY(ChatModel* model READ model CONSTANT)
 
 public:
+    using ToolsProvider = std::function<QJsonArray()>;
+
     explicit ChatController(RestTransport* transport, QObject* parent = nullptr);
 
     ChatModel* model() const { return m_chatModel; }
     QVariantList activeDraftAttachments() const;
     void setUserUuid(const QString& userUuid);
+    void setToolsProvider(ToolsProvider provider);
 
     Q_INVOKABLE void fetchChats();
     Q_INVOKABLE void createNewChat();
@@ -38,21 +45,28 @@ public:
     Q_INVOKABLE void sendMessage(const QString& text);
     Q_INVOKABLE static QString formatContent(const QString& content, const QColor& textColor = Qt::white, double fontSizePt = 11.0);
 
+    QString activeChatTitle() const;
+
 public slots:
     void onUploadProgress(const QString& localId, double progress);
     void onUploadSucceeded(const QString& localId, const QJsonObject& response);
     void onUploadFailed(const QString& localId, const QString& error);
+    void onToolBatchCompleted(const QString& chatId, const QJsonArray& toolResultMessages);
 
 signals:
     void activeDraftAttachmentsChanged();
     void errorOccurred(const QString& message);
     void generationStarted();
     void generationFinished();
+    void toolCallsRequested(const QString& chatId, const QJsonArray& toolCalls);
+
+    void activeChatTitleChanged();
 
 private slots:
     void pollGenerationTask();
 
 private:
+    void sendChatPayload(const QString& targetChatId);
     int findDraftIndex(const QString& localId) const;
     QString buildFileUrl(const QString& chatId, const QString& fileId) const;
 
@@ -61,7 +75,8 @@ private:
     QTimer* m_pollTimer;
     QString m_userUuid;
     QString m_currentTaskId;
+    ToolsProvider m_toolsProvider;
+    int m_toolTurnDepth = 0;
 
-    // Общий пул черновиков по всем чатам: [{localId, chatId, localUrl, localPath, remoteUrl, fileId, mediaType, status, progress, error}]
     QVariantList m_allDrafts;
 };

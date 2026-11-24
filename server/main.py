@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from huggingface_hub import scan_cache_dir
 
 from database import db
+from sqlite3 import IntegrityError
 from schemas import (
     ChatRequest,
     CompleteUploadRequest,
@@ -46,7 +47,11 @@ def login_user(req: UserAuthRequest):
 
 @app.post("/chats")
 def create_chat(req: CreateChatRequest):
-    return db.create_chat(req.user_uuid, req.title)
+    try:
+        return db.create_chat(req.user_uuid, req.title)
+    except IntegrityError:
+        raise HTTPException(401, "User not found. Please log in again.")
+
 
 
 @app.get("/chats")

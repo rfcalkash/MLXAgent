@@ -38,11 +38,11 @@ RestTransport::~RestTransport()
 }
 
 void RestTransport::send(const QString& method,
-                         const QString& endpoint,
-                         const QJsonObject& body,
-                         SuccessCb onSuccess,
-                         ErrorCb onError,
-                         const QUrlQuery& query)
+    const QString& endpoint,
+    const QJsonObject& body,
+    SuccessCb onSuccess,
+    ErrorCb onError,
+    const QUrlQuery& query)
 {
     QUrl url(m_serverUrl + endpoint);
     if (!query.isEmpty()) {
@@ -60,12 +60,17 @@ void RestTransport::send(const QString& method,
         const QJsonObject jsonObj = QJsonDocument::fromJson(reply->readAll()).object();
 
         if (reply->error() != QNetworkReply::NoError) {
+            const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (statusCode == 401) {
+                emit unauthorized();
+            }
+
             QString errMsg = jsonObj.contains("detail")
-            ? jsonObj["detail"].toString()
-            : reply->errorString();
+                ? jsonObj["detail"].toString()
+                : reply->errorString();
             if (onError)
                 onError(errMsg);
-            else
+            else if (statusCode != 401)
                 emit networkError(errMsg);
             return;
         }

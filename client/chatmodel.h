@@ -11,6 +11,8 @@ struct ChatMessage {
     QString think;
     QString warning;
     QVariantList attachments;
+    QJsonArray toolCalls;
+    QString toolCallId;
 };
 
 class ChatModel : public QAbstractListModel {
@@ -22,7 +24,8 @@ public:
         ContentRole,
         ThinkRole,
         WarningRole,
-        AttachmentsRole
+        AttachmentsRole,
+        ToolCallsRole
     };
 
     explicit ChatModel(QObject* parent = nullptr);
@@ -34,7 +37,8 @@ public:
     void appendMessage(const ChatMessage& msg);
     void updateLastAssistantMessage(const QString& think,
         const QString& content,
-        const QString& warning = { });
+        const QString& warning = { },
+        const QJsonArray& toolCalls = { });
     void clear();
     QJsonArray toApiMessages() const;
 

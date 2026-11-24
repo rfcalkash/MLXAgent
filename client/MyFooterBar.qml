@@ -9,6 +9,7 @@ ToolBar {
     required property string serverStatus
     required property var capabilities
     required property var draftAttachments
+    property int maxHeight
 
     // Исходящие сигналы
     signal attachClicked()
@@ -16,7 +17,7 @@ ToolBar {
     signal removeAttachmentClicked(string localId)
     signal sendClicked(string text)
 
-    height: Math.min(footerCol.implicitHeight + 12, parent.height * 0.45)
+    height: Math.min(footerCol.implicitHeight + 12, maxHeight)
     property bool hasUploadingFiles: draftAttachments.some(item => item.status === "uploading")
 
     ColumnLayout {

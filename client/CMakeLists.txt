@@ -36,8 +36,8 @@ qt_add_qml_module(appclient
     URI MlxClient
     QML_FILES
         Main.qml
-        HeaderBar.qml
         MyFooterBar.qml
+        Settings.qml
     SOURCES
         PropertyMacros.h
         fileuploader.h fileuploader.cpp
@@ -48,8 +48,8 @@ qt_add_qml_module(appclient
         chatcontroller.h chatcontroller.cpp
         mathformatter.h mathformatter.cpp
         appcontext.h appcontext.cpp
-        SOURCES chatcontroller.h chatcontroller.cpp
-        SOURCES appcontext.h appcontext.cpp
+        webfetcher.h webfetcher.cpp
+        toolcontroller.h toolcontroller.cpp
 )
 
 

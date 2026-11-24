@@ -23,16 +23,17 @@ public:
     ~RestTransport() override;
 
     void send(const QString& method,
-              const QString& endpoint,
-              const QJsonObject& body = { },
-              SuccessCb onSuccess = nullptr,
-              ErrorCb onError = nullptr,
-              const QUrlQuery& query = { });
+        const QString& endpoint,
+        const QJsonObject& body = { },
+        SuccessCb onSuccess = nullptr,
+        ErrorCb onError = nullptr,
+        const QUrlQuery& query = { });
 
     void enqueueUpload(UploadTask task);
 
 signals:
     void networkError(const QString& message);
+    void unauthorized();
     void uploadProgress(const QString& localId, double progress);
     void uploadSucceeded(const QString& localId, const QJsonObject& response);
     void uploadFailed(const QString& localId, const QString& error);

@@ -28,6 +28,8 @@ QVariant ChatModel::data(const QModelIndex& index, int role) const
         return msg.warning;
     case AttachmentsRole:
         return msg.attachments;
+    case ToolCallsRole:
+        return msg.toolCalls.toVariantList();
     default:
         return { };
     }
@@ -40,7 +42,8 @@ QHash<int, QByteArray> ChatModel::roleNames() const
         { ContentRole, "content" },
         { ThinkRole, "think" },
         { WarningRole, "warning" },
-        { AttachmentsRole, "attachments" }
+        { AttachmentsRole, "attachments" },
+        { ToolCallsRole, "toolCalls" }
     };
     return roles;
 }
@@ -55,7 +58,8 @@ void ChatModel::appendMessage(const ChatMessage& msg)
 
 void ChatModel::updateLastAssistantMessage(const QString& think,
     const QString& content,
-    const QString& warning)
+    const QString& warning,
+    const QJsonArray& toolCalls)
 {
     if (m_items.isEmpty() || m_items.last().role != "assistant")
         return;
@@ -68,9 +72,12 @@ void ChatModel::updateLastAssistantMessage(const QString& think,
     if (!warning.isEmpty()) {
         msg.warning = warning;
     }
+    if (!toolCalls.isEmpty()) {
+        msg.toolCalls = toolCalls;
+    }
 
     const QModelIndex idx = index(lastRow);
-    emit dataChanged(idx, idx, { ContentRole, ThinkRole, WarningRole });
+    emit dataChanged(idx, idx, { ContentRole, ThinkRole, WarningRole, ToolCallsRole });
 }
 
 void ChatModel::clear()
@@ -86,7 +93,7 @@ QJsonArray ChatModel::toApiMessages() const
 {
     QJsonArray arr;
     for (const auto& msg : m_items) {
-        if (msg.content.trimmed().isEmpty() && msg.attachments.isEmpty())
+        if (msg.content.trimmed().isEmpty() && msg.attachments.isEmpty() && msg.toolCalls.isEmpty() && msg.toolCallId.isEmpty())
             continue;
 
         QJsonArray attArr;
@@ -103,6 +110,12 @@ QJsonArray ChatModel::toApiMessages() const
         };
         if (!attArr.isEmpty()) {
             obj["attachments"] = attArr;
+        }
+        if (!msg.toolCalls.isEmpty()) {
+            obj["tool_calls"] = msg.toolCalls;
+        }
+        if (!msg.toolCallId.isEmpty()) {
+            obj["tool_call_id"] = msg.toolCallId;
         }
         arr.append(obj);
     }

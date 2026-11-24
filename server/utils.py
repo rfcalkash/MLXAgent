@@ -193,9 +193,15 @@ def parse_model_output(raw_text: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
 
-    # 3. Gemma 4: <|call>call:func_name{key:value}<call|>
-    if not tool_calls and "<|call>" in answer:
-        gemma_matches = list(re.finditer(r"<\|call>call:(\w+)\{(.*?)\}<call\|>", answer, flags=re.DOTALL))
+    # 3. Gemma 4: <|tool_call>call:func_name{key:value}<tool_call|>
+    if not tool_calls and "<|tool_call>" in answer:
+        gemma_matches = list(
+            re.finditer(
+                r"<\|tool_call>call:(\w+)\{(.*?)\}<tool_call\|>",
+                answer,
+                flags=re.DOTALL,
+            )
+        )
         for m in gemma_matches:
             tool_calls.append({
                 "id": f"call_{uuid.uuid4().hex[:8]}",
@@ -205,7 +211,10 @@ def parse_model_output(raw_text: str) -> dict[str, Any]:
                     "arguments": _parse_gemma_args(m.group(2)),
                 },
             })
-        answer = re.sub(r"<\|call>.*?<call\|>", "", answer, flags=re.DOTALL).strip()
+        answer = re.sub(
+            r"<\|tool_call>.*?<tool_call\|>", "", answer, flags=re.DOTALL
+        ).strip()
+
 
     return {
         "think": parsed["think"],

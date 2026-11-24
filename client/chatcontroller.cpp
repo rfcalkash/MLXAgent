@@ -2,8 +2,11 @@
 #include "mathformatter.h"
 
 #include <QFileInfo>
-#include <QJsonArray>
 #include <QUuid>
+
+namespace {
+constexpr int MAX_TOOL_TURN_DEPTH = 8;
+}
 
 ChatController::ChatController(RestTransport* transport, QObject* parent)
     : QObject(parent)
@@ -14,6 +17,13 @@ ChatController::ChatController(RestTransport* transport, QObject* parent)
     m_pollTimer->setInterval(1000);
     connect(m_pollTimer, &QTimer::timeout, this, &ChatController::pollGenerationTask);
     connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeDraftAttachmentsChanged);
+    connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeChatTitleChanged);
+    connect(this, &ChatController::chatsChanged, this, &ChatController::activeChatTitleChanged);
+}
+
+void ChatController::setToolsProvider(ToolsProvider provider)
+{
+    m_toolsProvider = std::move(provider);
 }
 
 QString ChatController::formatContent(const QString& content, const QColor& textColor, double fontSizePt)
@@ -71,11 +81,10 @@ void ChatController::fetchChats()
 
     m_transport->send("GET", "/chats", { }, [this](const QJsonObject& res) {
         m_chats.clear();
-        for (const auto& v : res["chats"].toArray()) {
+        foreach (const auto& v, res["chats"].toArray()) {
             m_chats.append(v.toObject().toVariantMap());
         }
-        emit chatsChanged();
-    }, nullptr, q);
+        emit chatsChanged(); }, nullptr, q);
 }
 
 void ChatController::createNewChat()
@@ -100,25 +109,24 @@ void ChatController::selectChat(const QString& chatId)
 
     m_transport->send("GET", "/chats/" + chatId, { }, [this, chatId](const QJsonObject& res) {
         m_chatModel->clear();
-        for (const auto& val : res["messages"].toArray()) {
+        foreach (const auto& val, res["messages"].toArray()) {
             const auto obj = val.toObject();
             QVariantList atts;
-            for (const auto& a : obj["attachments"].toArray()) {
+            foreach (const auto& a, obj["attachments"].toArray()) {
                 const auto aObj = a.toObject();
                 const QString fid = aObj["file_id"].toString();
                 atts.append(QVariantMap {
                     { "type", aObj["type"].toString() },
                     { "file_id", fid },
-                    { "url", buildFileUrl(chatId, fid) }
-                });
+                    { "url", buildFileUrl(chatId, fid) } });
             }
-            m_chatModel->appendMessage({
-                .role = obj["role"].toString(),
+            m_chatModel->appendMessage({ .role = obj["role"].toString(),
                 .content = obj["content"].toString(),
                 .think = obj["think"].toString(),
                 .warning = obj["warning"].toString(),
-                .attachments = atts
-            });
+                .attachments = atts,
+                .toolCalls = obj["tool_calls"].toArray(),
+                .toolCallId = obj["tool_call_id"].toString() });
         }
     });
 }
@@ -131,7 +139,6 @@ void ChatController::deleteChat(const QString& chatId)
     q.addQueryItem("user_uuid", m_userUuid);
 
     m_transport->send("DELETE", "/chats/" + chatId, { }, [this, chatId](const QJsonObject&) {
-        // Удаляем из пула черновики удаленного чата
         for (int i = m_allDrafts.size() - 1; i >= 0; --i) {
             if (m_allDrafts[i].toMap().value("chatId").toString() == chatId) {
                 m_allDrafts.removeAt(i);
@@ -144,11 +151,10 @@ void ChatController::deleteChat(const QString& chatId)
             m_chatModel->clear();
             emit activeChatIdChanged();
         }
-        fetchChats();
-    }, nullptr, q);
+        fetchChats(); }, nullptr, q);
 }
 
-// --- Общий пул черновиков вложений (с привязкой к chatId) ---
+// --- Черновики вложений ---
 
 int ChatController::findDraftIndex(const QString& localId) const
 {
@@ -166,7 +172,7 @@ void ChatController::attachFile(const QUrl& fileUrl)
         return;
 
     const QString localPath = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
-    if (!QFileInfo::exists(localPath)) {
+    if (fileUrl.isLocalFile() && !QFileInfo::exists(localPath)) {
         emit errorOccurred("Файл не найден: " + localPath);
         return;
     }
@@ -183,8 +189,7 @@ void ChatController::attachFile(const QUrl& fileUrl)
             { "mediaType", "image" },
             { "status", "uploading" },
             { "progress", 0.0 },
-            { "error", "" }
-        });
+            { "error", "" } });
         if (targetChatId == m_activeChatId) {
             emit activeDraftAttachmentsChanged();
         }
@@ -318,7 +323,7 @@ void ChatController::onUploadFailed(const QString& localId, const QString& error
     emit errorOccurred(error);
 }
 
-// --- Отправка сообщения и поллинг ответа ---
+// --- Отправка сообщения, цикл Tool Calling и поллинг ответа ---
 
 void ChatController::sendMessage(const QString& text)
 {
@@ -326,7 +331,7 @@ void ChatController::sendMessage(const QString& text)
         return;
     if (text.trimmed().isEmpty() && activeDraftAttachments().isEmpty())
         return;
-
+    m_toolTurnDepth = 0;
     auto dispatchChat = [this, text](const QString& targetChatId) {
         QVariantList readyAtts;
         for (int i = m_allDrafts.size() - 1; i >= 0; --i) {
@@ -335,30 +340,15 @@ void ChatController::sendMessage(const QString& text)
                 readyAtts.prepend(QVariantMap {
                     { "type", map["mediaType"].toString() },
                     { "file_id", map["fileId"].toString() },
-                    { "url", map["remoteUrl"].toString() }
-                });
+                    { "url", map["remoteUrl"].toString() } });
                 m_allDrafts.removeAt(i);
             }
         }
         emit activeDraftAttachmentsChanged();
-        m_chatModel->appendMessage({
-            .role = "user",
+        m_chatModel->appendMessage({ .role = "user",
             .content = text,
-            .attachments = readyAtts
-        });
-        const QJsonArray msgArray = m_chatModel->toApiMessages();
-        m_chatModel->appendMessage({ .role = "assistant" });
-        QJsonObject body {
-            { "user_uuid", m_userUuid },
-            { "chat_id", targetChatId },
-            { "messages", msgArray },
-            { "max_tokens", 16000 }
-        };
-        m_transport->send("POST", "/chat", body, [this](const QJsonObject& res) {
-            m_currentTaskId = res["task_id"].toString();
-            emit generationStarted();
-            m_pollTimer->start();
-        });
+            .attachments = readyAtts });
+        sendChatPayload(targetChatId);
     };
     if (m_activeChatId.isEmpty()) {
         m_transport->send("POST", "/chats", { { "user_uuid", m_userUuid } }, [this, dispatchChat](const QJsonObject& res) {
@@ -370,6 +360,41 @@ void ChatController::sendMessage(const QString& text)
     } else {
         dispatchChat(m_activeChatId);
     }
+}
+void ChatController::sendChatPayload(const QString& targetChatId)
+{
+    const QJsonArray msgArray = m_chatModel->toApiMessages();
+    m_chatModel->appendMessage({ .role = "assistant" });
+    QJsonObject body {
+        { "user_uuid", m_userUuid },
+        { "chat_id", targetChatId },
+        { "messages", msgArray },
+        { "max_tokens", 16000 }
+    };
+    if (m_toolsProvider) {
+        const QJsonArray tools = m_toolsProvider();
+        if (!tools.isEmpty()) {
+            body["tools"] = tools;
+        }
+    }
+    m_transport->send("POST", "/chat", body, [this](const QJsonObject& res) {
+        m_currentTaskId = res["task_id"].toString();
+        emit generationStarted();
+        m_pollTimer->start();
+    });
+}
+void ChatController::onToolBatchCompleted(const QString& chatId, const QJsonArray& toolResultMessages)
+{
+    if (chatId != m_activeChatId)
+        return;
+    for (const auto& val : toolResultMessages) {
+        const auto obj = val.toObject();
+        m_chatModel->appendMessage({ .role = "tool",
+            .content = obj["content"].toString(),
+            .toolCallId = obj["tool_call_id"].toString() });
+    }
+    m_toolTurnDepth++;
+    sendChatPayload(chatId);
 }
 void ChatController::pollGenerationTask()
 {
@@ -383,18 +408,25 @@ void ChatController::pollGenerationTask()
         const QJsonObject result = obj["result"].toObject();
         if (type == "generate" && (status == "running" || status == "completed")) {
             const QString warning = (status == "completed" && !obj["error"].isNull())
-            ? obj["error"].toString()
-            : QString();
+                ? obj["error"].toString()
+                : QString();
+            const QJsonArray toolCalls = result["tool_calls"].toArray();
             m_chatModel->updateLastAssistantMessage(
                 result["think"].toString(),
                 result["answer"].toString(),
-                warning);
+                warning,
+                toolCalls);
         }
         if (status == "completed") {
             m_pollTimer->stop();
             m_currentTaskId.clear();
-            fetchChats();
-            emit generationFinished();
+            const QJsonArray toolCalls = result["tool_calls"].toArray();
+            if (!toolCalls.isEmpty() && m_toolTurnDepth < MAX_TOOL_TURN_DEPTH) {
+                emit toolCallsRequested(m_activeChatId, toolCalls);
+            } else {
+                fetchChats();
+                emit generationFinished();
+            }
         } else if (status == "failed") {
             m_pollTimer->stop();
             m_currentTaskId.clear();
@@ -402,4 +434,18 @@ void ChatController::pollGenerationTask()
             emit generationFinished();
         }
     });
+}
+QString ChatController::activeChatTitle() const
+{
+    if (m_activeChatId.isEmpty())
+        return QStringLiteral("Новый чат");
+
+    for (const auto& item : m_chats) {
+        const auto map = item.toMap();
+        if (map.value("id").toString() == m_activeChatId) {
+            const QString title = map.value("title").toString();
+            return title.isEmpty() ? QStringLiteral("Чат") : title;
+        }
+    }
+    return QStringLiteral("Чат");
 }

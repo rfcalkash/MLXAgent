@@ -3,9 +3,11 @@
 AppContext::AppContext(QObject* parent)
     : QObject(parent)
     , m_transport(new RestTransport(this))
+    , m_fetcher(new WebFetcher(m_transport, this))
     , m_auth(new AuthController(m_transport, this))
     , m_models(new ModelController(m_transport, this))
     , m_chat(new ChatController(m_transport, this))
+    , m_tools(new ToolController(m_fetcher, this))
 {
     connect(m_transport, &RestTransport::networkError, this, &AppContext::errorOccurred);
     connect(m_models, &ModelController::errorOccurred, this, &AppContext::errorOccurred);
@@ -26,6 +28,12 @@ AppContext::AppContext(QObject* parent)
         m_models->setGenerating(true);
     });
     connect(m_chat, &ChatController::generationFinished, m_models, &ModelController::refresh);
+
+    // Звезда Tool Calling: ChatController <-> ToolController
+    m_chat->setToolsProvider([this]() { return m_tools->enabledToolSchemas(); });
+    connect(m_chat, &ChatController::toolCallsRequested, m_tools, &ToolController::executeToolCalls);
+    connect(m_tools, &ToolController::toolBatchCompleted, m_chat, &ChatController::onToolBatchCompleted);
+    connect(m_transport, &RestTransport::unauthorized, m_auth, &AuthController::logout);
 }
 
 void AppContext::initialize()
