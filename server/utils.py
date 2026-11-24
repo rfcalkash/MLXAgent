@@ -2,7 +2,8 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Optional
+import uuid
+from typing import Optional, Any
 from huggingface_hub import scan_cache_dir
 
 THINKING_PAIRS = [
@@ -125,3 +126,89 @@ def detect_model_capabilities(snapshot_path: Optional[Path]) -> list[str]:
     if has_audio:
         caps.append("audio")
     return caps
+
+def _parse_gemma_args(raw_args: str) -> dict[str, Any]:
+    """Парсит аргументы Gemma 4 формата key:value, key2:"str" в dict."""
+    args: dict[str, Any] = {}
+    # Простой парсер пар ключ:значение с учетом кавычек
+    pattern = re.compile(r'(\w+)\s*:\s*("(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^,}]+)')
+    for m in pattern.finditer(raw_args):
+        key = m.group(1)
+        val_str = m.group(2).strip()
+        if (val_str.startswith('"') and val_str.endswith('"')) or (
+            val_str.startswith("'") and val_str.endswith("'")
+        ):
+            args[key] = val_str[1:-1].replace('\\"', '"').replace("\\n", "\n")
+        elif val_str.lower() == "true":
+            args[key] = True
+        elif val_str.lower() == "false":
+            args[key] = False
+        else:
+            try:
+                args[key] = int(val_str) if "." not in val_str else float(val_str)
+            except ValueError:
+                args[key] = val_str
+    return args
+
+
+def parse_model_output(raw_text: str) -> dict[str, Any]:
+    parsed = parse_thinking(raw_text)
+    answer = parsed["answer"] or ""
+    tool_calls: list[dict[str, Any]] = []
+
+    # 1. Qwen / Hermes: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+    qwen_matches = list(re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", answer, flags=re.DOTALL))
+    if qwen_matches:
+        for idx, m in enumerate(qwen_matches):
+            try:
+                data = json.loads(m.group(1))
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": data.get("name", ""),
+                        "arguments": data.get("arguments", {}),
+                    },
+                })
+            except json.JSONDecodeError:
+                pass
+        answer = re.sub(r"<tool_call>.*?</tool_call>", "", answer, flags=re.DOTALL).strip()
+
+    # 2. Mistral: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
+    if not tool_calls and "[TOOL_CALLS]" in answer:
+        m = re.search(r"\[TOOL_CALLS\]\s*(\[.*\])", answer, flags=re.DOTALL)
+        if m:
+            try:
+                arr = json.loads(m.group(1))
+                for item in arr:
+                    tool_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": item.get("name", ""),
+                            "arguments": item.get("arguments", {}),
+                        },
+                    })
+                answer = answer[: m.start()].strip()
+            except json.JSONDecodeError:
+                pass
+
+    # 3. Gemma 4: <|call>call:func_name{key:value}<call|>
+    if not tool_calls and "<|call>" in answer:
+        gemma_matches = list(re.finditer(r"<\|call>call:(\w+)\{(.*?)\}<call\|>", answer, flags=re.DOTALL))
+        for m in gemma_matches:
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": m.group(1),
+                    "arguments": _parse_gemma_args(m.group(2)),
+                },
+            })
+        answer = re.sub(r"<\|call>.*?<call\|>", "", answer, flags=re.DOTALL).strip()
+
+    return {
+        "think": parsed["think"],
+        "answer": answer,
+        "tool_calls": tool_calls,
+    }

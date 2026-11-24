@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel
 
 
@@ -25,7 +25,7 @@ class CreateChatRequest(BaseModel):
 class CompleteUploadRequest(BaseModel):
     user_uuid: str
     chat_id: str
-    upload_id: str  # Ожидаемый SHA-256 хэш всего файла в hex
+    upload_id: str
     filename: str
 
 
@@ -39,20 +39,23 @@ class LoadModelRequest(BaseModel):
 
 
 class Attachment(BaseModel):
-    type: str  # "image", "video", "audio"
+    type: str
     file_id: str
 
 
 class ChatMessageIn(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = ""
     attachments: list[Attachment] = []
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
     user_uuid: str
     chat_id: str
     messages: list[ChatMessageIn]
-    max_tokens: int = 1024
+    tools: Optional[list[dict[str, Any]]] = None
+    max_tokens: int = 16000
     temp: float = 0.7
     enable_thinking: bool = True

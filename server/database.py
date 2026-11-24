@@ -1,9 +1,10 @@
 from datetime import datetime
 import hashlib
+import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Optional
+from typing import Any, Optional
 import uuid
 
 from storage import STORAGE_ROOT, storage
@@ -49,6 +50,8 @@ class DatabaseManager:
                     content TEXT NOT NULL,
                     think TEXT,
                     warning TEXT,
+                    tool_calls TEXT,
+                    tool_call_id TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
                 );
@@ -66,6 +69,13 @@ class DatabaseManager:
                     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
                 );
             """)
+
+            # Мягкая миграция для уже существующей БД
+            for col in ("tool_calls TEXT", "tool_call_id TEXT"):
+                try:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col};")
+                except sqlite3.OperationalError:
+                    pass
 
     # --- Пользователи ---
 
@@ -160,15 +170,30 @@ class DatabaseManager:
         think: Optional[str] = None,
         warning: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
+        tool_calls: Optional[list[dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         msg_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
+        tool_calls_json = (
+            json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
+        )
 
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO messages (id, chat_id, role, content, think, warning, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (msg_id, chat_id, role, content, think, warning, now),
+                """INSERT INTO messages (id, chat_id, role, content, think, warning, tool_calls, tool_call_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    msg_id,
+                    chat_id,
+                    role,
+                    content,
+                    think,
+                    warning,
+                    tool_calls_json,
+                    tool_call_id,
+                    now,
+                ),
             )
             conn.execute(
                 "UPDATE chats SET updated_at = ? WHERE id = ?", (now, chat_id)
@@ -198,13 +223,16 @@ class DatabaseManager:
     def get_chat_messages(self, chat_id: str) -> list[dict]:
         with self._get_conn() as conn:
             msgs = conn.execute(
-                "SELECT id, role, content, think, warning, created_at FROM messages WHERE chat_id = ? ORDER BY created_at ASC",
+                """SELECT id, role, content, think, warning, tool_calls, tool_call_id, created_at
+                   FROM messages WHERE chat_id = ? ORDER BY created_at ASC""",
                 (chat_id,),
             ).fetchall()
 
             result = []
             for m in msgs:
                 msg_dict = dict(m)
+                if msg_dict["tool_calls"]:
+                    msg_dict["tool_calls"] = json.loads(msg_dict["tool_calls"])
                 atts = conn.execute(
                     "SELECT file_id, media_type as type, rel_path FROM attachments WHERE message_id = ?",
                     (m["id"],),
