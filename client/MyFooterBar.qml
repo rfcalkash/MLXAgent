@@ -1,33 +1,45 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
-import MlxClient
-import QtQuick.Controls.Material
 
 ToolBar {
     id: footerBar
+
+    // Входящий контракт
+    required property string serverStatus
+    required property var capabilities
+    required property var draftAttachments
+
+    // Исходящие сигналы
+    signal attachClicked()
+    signal retryAttachmentClicked(string localId)
+    signal removeAttachmentClicked(string localId)
+    signal sendClicked(string text)
+
     height: Math.min(footerCol.implicitHeight + 12, parent.height * 0.45)
-    property bool hasUploadingFiles: app.chat.activeDraftAttachments.some(item => item.status === "uploading")
+    property bool hasUploadingFiles: draftAttachments.some(item => item.status === "uploading")
+
     ColumnLayout {
         id: footerCol
         anchors.fill: parent
         anchors.margins: 6
         spacing: 6
+
         Row {
-            visible: app.chat.activeDraftAttachments.length > 0
+            visible: footerBar.draftAttachments.length > 0
             spacing: 8
+
             Repeater {
-                model: app.chat.activeDraftAttachments
+                model: footerBar.draftAttachments
                 Rectangle {
                     width: 72
                     height: 72
                     radius: 6
                     color: "#1e1e1e"
-                    border.color: modelData.status === "error" ? "#f4
-        4336" : "transparent"
+                    border.color: modelData.status === "error" ? "#f44336" : "transparent"
                     border.width: 2
                     clip: true
+
                     Image {
                         anchors.fill: parent
                         fillMode: Image.PreserveAspectCrop
@@ -47,7 +59,7 @@ ToolBar {
                         width: 30
                         height: 30
                         text: "↻"
-                        onClicked: app.chat.retryAttachment(modelData.localId)
+                        onClicked: footerBar.retryAttachmentClicked(modelData.localId)
                     }
                     RoundButton {
                         width: 22
@@ -56,18 +68,20 @@ ToolBar {
                         anchors.right: parent.right
                         text: "✕"
                         font.pixelSize: 10
-                        onClicked: app.chat.removeDraftAttachment(modelData.localId)
+                        onClicked: footerBar.removeAttachmentClicked(modelData.localId)
                     }
                 }
             }
         }
+
         RowLayout {
             Layout.fillWidth: true
+
             Button {
                 text: "📎"
-                visible: app.models.capabilities.includes("image")
-                enabled: app.models.serverStatus === "LOADED"
-                onClicked: imagePicker.open()
+                visible: footerBar.capabilities.includes("image")
+                enabled: footerBar.serverStatus === "LOADED"
+                onClicked: footerBar.attachClicked()
                 Layout.alignment: Qt.AlignBottom
             }
             ScrollView {
@@ -77,20 +91,20 @@ ToolBar {
                 TextArea {
                     id: promptInput
                     width: parent.width
-                    placeholderText: app.models.serverStatus === "LOADED" || app.models.serverStatus === "GENERATING"
+                    placeholderText: footerBar.serverStatus === "LOADED" || footerBar.serverStatus === "GENERATING"
                                      ? "Введите сообщение..."
                                      : "Сначала загрузите модель..."
-                    enabled: app.models.serverStatus === "LOADED"
+                    enabled: footerBar.serverStatus === "LOADED"
                     wrapMode: TextArea.Wrap
                 }
             }
             Button {
                 text: "Отправить"
-                enabled: app.models.serverStatus === "LOADED"
+                enabled: footerBar.serverStatus === "LOADED"
                          && !footerBar.hasUploadingFiles
-                         && (promptInput.text.trim().length > 0 || app.chat.activeDraftAttachments.length > 0)
+                         && (promptInput.text.trim().length > 0 || footerBar.draftAttachments.length > 0)
                 onClicked: {
-                    app.chat.sendMessage(promptInput.text)
+                    footerBar.sendClicked(promptInput.text)
                     promptInput.clear()
                 }
                 Layout.alignment: Qt.AlignBottom

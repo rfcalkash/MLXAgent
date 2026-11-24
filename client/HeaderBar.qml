@@ -1,118 +1,138 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
-import MlxClient
 import QtQuick.Controls.Material
 
 ToolBar {
     id: headerBar
+
+    // Входящий контракт (required гарантирует ошибку на этапе запуска, если забыть пробросить)
+    required property string serverUrl
+    required property string serverStatus
+    required property string activeModel
+    required property bool textOnlyMode
+    required property bool isBusy
+    required property var models
+    required property int activeModelIndex
+
+    // Исходящие сигналы
+    signal menuClicked()
+    signal connectClicked(string url)
+    signal loadModelClicked(string modelId, bool textOnly)
+    signal unloadModelClicked()
+    signal downloadModelClicked()
+    signal deleteModelClicked(string modelId)
+
     property bool expanded: false
-    property bool showFull: expanded || (app.models.serverStatus !== "LOADED" && app.models.serverStatus !== "GENERATING")
+    property bool showFull: expanded || (serverStatus !== "LOADED" && serverStatus !== "GENERATING")
+
+    // Защита от разрушения декларативных биндингов при ручном вводе/выборе пользователем
+    onServerUrlChanged: urlField.text = serverUrl
+    onActiveModelIndexChanged: modelSelector.currentIndex = activeModelIndex
+    Component.onCompleted: {
+        urlField.text = serverUrl
+        modelSelector.currentIndex = activeModelIndex
+    }
+
     clip: true
-    height: (optionsPane.visible ? optionsPane.implicitHeight : statusPane.implicitHeight) + 12
+    height: optionsPane.implicitHeight + 12
     Behavior on height { NumberAnimation { duration: 200 } }
+
     ColumnLayout {
         id: optionsPane
         anchors.fill: parent
-        anchors.margins: 6            
-        
+        anchors.margins: 6
+
         RowLayout {
             Layout.fillWidth: true
-            // Layout.alignment: Qt.AlignTop
             Layout.preferredHeight: 60
+
             RoundButton {
                 text: "☰"
-                onClicked: chatsDrawer.open()
                 flat: true
+                onClicked: headerBar.menuClicked()
             }
             RoundButton {
                 text: headerBar.expanded ? "▲" : "▼"
-                onClicked: headerBar.expanded = !headerBar.expanded
                 flat: true
+                onClicked: headerBar.expanded = !headerBar.expanded
             }
             TextField {
                 id: urlField
                 Layout.fillWidth: true
                 visible: headerBar.showFull
-                text: app.transport.serverUrl
                 placeholderText: "http://192.168.1.X:8000"
             }
             Button {
                 text: "Подключить"
                 visible: headerBar.showFull
-                onClicked: app.transport.serverUrl = urlField.text
+                onClicked: headerBar.connectClicked(urlField.text)
             }
             ColumnLayout {
                 visible: !headerBar.showFull
                 Label {
                     textFormat: Text.StyledText
-                    text: "<b>Сервер: </b><i>" + app.transport.serverUrl + "</i>"
+                    text: "<b>Сервер: </b><i>" + headerBar.serverUrl + "</i>"
                     Layout.fillWidth: true
                 }
                 Label {
-                    text: "<b>Модель: </b><i>" + app.models.activeModel + "</i>"
+                    text: "<b>Модель: </b><i>" + headerBar.activeModel + "</i>"
                     Layout.fillWidth: true
                 }
             }
             Label {
-                text: app.models.serverStatus + (app.models.textOnlyMode && app.models.serverStatus === "LOADED" ? " [TXT]" : "")
+                text: headerBar.serverStatus + (headerBar.textOnlyMode && headerBar.serverStatus === "LOADED" ? " [TXT]" : "")
                 font.bold: true
-                color: app.models.serverStatus === "LOADED" ? Material.color(Material.Green) :
-                                                              (app.models.serverStatus === "OFFLINE" ? Material.color(Material.Red) : Material.color(Material.Orange))
+                color: headerBar.serverStatus === "LOADED" ? Material.color(Material.Green) :
+                       (headerBar.serverStatus === "OFFLINE" ? Material.color(Material.Red) : Material.color(Material.Orange))
             }
         }
-        
+
         RowLayout {
             Layout.fillWidth: true
             visible: headerBar.showFull
+
             ComboBox {
                 id: modelSelector
                 Layout.fillWidth: true
-                model: app.models.models
+                model: headerBar.models
                 textRole: "id"
-                enabled: !app.models.isBusy && app.models.serverStatus !== "LOADED"
-                Connections {
-                    target: app.models
-                    function onActiveModelIndexChanged() {
-                        modelSelector.currentIndex = app.models.activeModelIndex
-                    }
-                }
+                enabled: !headerBar.isBusy && headerBar.serverStatus !== "LOADED"
             }
             CheckBox {
                 id: textOnlyCheck
                 text: "Text-only"
                 checked: false
-                enabled: !app.models.isBusy && app.models.serverStatus !== "LOADED"
+                enabled: !headerBar.isBusy && headerBar.serverStatus !== "LOADED"
             }
             Button {
-                text: app.models.serverStatus === "LOADED" ? "Выгрузить" : "Загрузить"
-                enabled: !app.models.isBusy && (app.models.serverStatus === "LOADED" || modelSelector.currentIndex >= 0)
+                text: headerBar.serverStatus === "LOADED" ? "Выгрузить" : "Загрузить"
+                enabled: !headerBar.isBusy && (headerBar.serverStatus === "LOADED" || modelSelector.currentIndex >= 0)
                 onClicked: {
-                    if (app.models.serverStatus === "LOADED") {
-                        app.models.unloadModel()
+                    if (headerBar.serverStatus === "LOADED") {
+                        headerBar.unloadModelClicked()
                     } else {
-                        var selectedId = app.models.models[modelSelector.currentIndex].id
-                        app.models.loadModel(selectedId, textOnlyCheck.checked)
+                        var selectedId = headerBar.models[modelSelector.currentIndex].id
+                        headerBar.loadModelClicked(selectedId, textOnlyCheck.checked)
                     }
                 }
             }
             Button {
                 text: "+ HF"
-                enabled: !app.models.isBusy
-                onClicked: downloadDialog.open()
+                enabled: !headerBar.isBusy
+                onClicked: headerBar.downloadModelClicked()
             }
             Button {
                 text: "Удалить"
-                enabled: !app.models.isBusy && app.models.serverStatus !== "LOADED" && modelSelector.currentIndex >= 0
+                enabled: !headerBar.isBusy && headerBar.serverStatus !== "LOADED" && modelSelector.currentIndex >= 0
                 onClicked: {
-                    var selectedId = app.models.models[modelSelector.currentIndex].id
-                    app.models.deleteModel(selectedId)
+                    var selectedId = headerBar.models[modelSelector.currentIndex].id
+                    headerBar.deleteModelClicked(selectedId)
                 }
             }
         }
     }
-    
+
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right

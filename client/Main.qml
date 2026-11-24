@@ -181,7 +181,23 @@ ApplicationWindow {
     header: HeaderBar {
         id: headerBar
         Material.background: window.Material.background
+
+        serverUrl: app.transport.serverUrl
+        serverStatus: app.models.serverStatus
+        activeModel: app.models.activeModel
+        textOnlyMode: app.models.textOnlyMode
+        isBusy: app.models.isBusy
+        models: app.models.models
+        activeModelIndex: app.models.activeModelIndex
+
+        onMenuClicked: chatsDrawer.open()
+        onConnectClicked: (url) => app.transport.serverUrl = url
+        onLoadModelClicked: (modelId, textOnly) => app.models.loadModel(modelId, textOnly)
+        onUnloadModelClicked: app.models.unloadModel()
+        onDownloadModelClicked: downloadDialog.open()
+        onDeleteModelClicked: (modelId) => app.models.deleteModel(modelId)
     }
+
 
     ListView {
         id: chatList
@@ -313,5 +329,14 @@ ApplicationWindow {
     footer: MyFooterBar {
         id: footerBar
         Material.background: window.Material.background
+
+        serverStatus: app.models.serverStatus
+        capabilities: app.models.capabilities
+        draftAttachments: app.chat.activeDraftAttachments
+
+        onAttachClicked: imagePicker.open()
+        onRetryAttachmentClicked: (localId) => app.chat.retryAttachment(localId)
+        onRemoveAttachmentClicked: (localId) => app.chat.removeDraftAttachment(localId)
+        onSendClicked: (text) => app.chat.sendMessage(text)
     }
 }
