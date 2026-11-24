@@ -36,6 +36,8 @@ qt_add_qml_module(appclient
     URI MlxClient
     QML_FILES
         Main.qml
+        HeaderBar.qml
+        MyFooterBar.qml
     SOURCES
         PropertyMacros.h
         fileuploader.h fileuploader.cpp
