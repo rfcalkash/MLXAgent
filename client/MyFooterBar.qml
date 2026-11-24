@@ -1,15 +1,15 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Controls.Material
 
-ToolBar {
+Pane {
     id: footerBar
-
     // Входящий контракт
     required property string serverStatus
     required property var capabilities
     required property var draftAttachments
-    property int maxHeight
+    // property int maxHeight
 
     // Исходящие сигналы
     signal attachClicked()
@@ -17,7 +17,7 @@ ToolBar {
     signal removeAttachmentClicked(string localId)
     signal sendClicked(string text)
 
-    height: Math.min(footerCol.implicitHeight + 12, maxHeight)
+    // implicitHeight: footerCol.implicitHeight+ 24
     property bool hasUploadingFiles: draftAttachments.some(item => item.status === "uploading")
 
     ColumnLayout {
@@ -88,10 +88,16 @@ ToolBar {
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: Material.delegateHeight
                 clip: true
+                contentWidth: availableWidth
+                // contentHeight: promptInput.contentHeight
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 TextArea {
                     id: promptInput
-                    width: parent.width
+                    // Layout.fillWidth: true
+                    // Layout.fillHeight: true
+                    width: parent.availableWidth
                     placeholderText: footerBar.serverStatus === "LOADED" || footerBar.serverStatus === "GENERATING"
                                      ? "Введите сообщение..."
                                      : "Сначала загрузите модель..."

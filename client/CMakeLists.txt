@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(client VERSION 0.1 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick Svg Network)
@@ -19,10 +20,11 @@ set(JKQtPlotter_BUILD_LIB_JKQTFASTPLOTTER OFF CACHE BOOL "" FORCE)
 set(JKQtPlotter_BUILD_LIB_JKQTMATH OFF CACHE BOOL "" FORCE)
 set(JKQtPlotter_BUILD_LIB_JKQTMATHTEXT ON CACHE BOOL "" FORCE)
 set(JKQtPlotter_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     jkqtplotter
-    GIT_REPOSITORY git@github.com:jkriege2/JKQtPlotter.git
+    GIT_REPOSITORY https://github.com/jkriege2/JKQtPlotter.git
     GIT_TAG master
     GIT_SHALLOW TRUE
 )

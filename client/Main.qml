@@ -77,13 +77,15 @@ ApplicationWindow {
         id: authDialog
         title: "Вход в аккаунт"
         modal: true
-        closePolicy: Popup.NoAutoClose
+        // closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
         visible: !app.auth.isLoggedIn
-
+        width: authLayout.width + 20
         ColumnLayout {
             spacing: 10
-            width: 280
+            id: authLayout
+            anchors.centerIn: parent
+            width: Math.min(window.width * 0.8, authButtonsRow.width+20)
             TextField {
                 id: loginField
                 Layout.fillWidth: true
@@ -96,6 +98,7 @@ ApplicationWindow {
                 echoMode: TextInput.Password
             }
             RowLayout {
+                id: authButtonsRow
                 Layout.fillWidth: true
                 Button {
                     text: "Войти"
@@ -427,21 +430,16 @@ ApplicationWindow {
                                     implicitHeight: Math.min(toolOutText.implicitHeight + 12, 240)
                                     color: "#181a19"
                                     radius: 6
-                                    ScrollView {
+                                    TextArea {
+                                        id: toolOutText
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        clip: true
-                                        TextArea {
-                                            id: toolOutText
-                                            width: parent.width
-                                            text: content
-                                            color: "#9e9e9e"
-                                            font.family: "Menlo"
-                                            font.pixelSize: 11
-                                            wrapMode: Text.WrapAnywhere
-                                            readOnly: true
-                                            selectByMouse: true
-                                        }
+                                        text: content
+                                        color: "#9e9e9e"
+                                        font.family: "Menlo"
+                                        font.pixelSize: 11
+                                        wrapMode: Text.WrapAnywhere
+                                        readOnly: true
+                                        selectByMouse: true
                                     }
                                 }
                                 TextArea {
@@ -507,7 +505,8 @@ ApplicationWindow {
                 MyFooterBar {
                     id: footerBar
                     Layout.fillWidth: true
-                    Material.background: window.Material.background
+                    // Layout.alignment: Qt.AlignBottom
+                    // Material.background: window.Material.background
                     serverStatus: app.models.serverStatus
                     capabilities: app.models.capabilities
                     draftAttachments: app.chat.activeDraftAttachments
@@ -515,7 +514,9 @@ ApplicationWindow {
                     onRetryAttachmentClicked: (localId) => app.chat.retryAttachment(localId)
                     onRemoveAttachmentClicked: (localId) => app.chat.removeDraftAttachment(localId)
                     onSendClicked: (text) => app.chat.sendMessage(text)
-                    maxHeight: window.height * 0.45
+                    // maxHeight: window.height * 0.45
+                    Layout.maximumHeight: window.height * 0.45
+                    Layout.minimumHeight: Material.delegateHeight
                 }
             }
         }

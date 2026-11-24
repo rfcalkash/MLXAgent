@@ -197,3 +197,4 @@ server/uv.lock
 server/.python-version
 /server/storage
 /client/.qtcreator
+/state
