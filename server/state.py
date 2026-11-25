@@ -1,6 +1,7 @@
+import asyncio
 from typing import Any, Optional
 import uuid
-from schemas import ServerStatus
+from schemas import ChatRequest, ServerStatus
 
 
 class ServerManager:
@@ -14,16 +15,16 @@ class ServerManager:
         self.model: Any = None
         self.processor: Any = None
         self.tasks: dict[str, dict] = {}
+        self.generation_queue: asyncio.Queue[tuple[str, ChatRequest]] = asyncio.Queue()
 
-    def create_task(
-        self, task_type: str, initial_result: Any = None
-    ) -> str:
+    def create_task(self, task_type: str, initial_status: str = "running") -> str:
         task_id = str(uuid.uuid4())
         self.tasks[task_id] = {
-            "task_id": task_id,
+            "id": task_id,
             "type": task_type,
-            "status": "running",
-            "result": initial_result,
+            "status": initial_status,
+            "progress": 0.0,
+            "result": None,
             "error": None,
         }
         return task_id

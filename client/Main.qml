@@ -84,8 +84,8 @@ ApplicationWindow {
         ColumnLayout {
             spacing: 10
             id: authLayout
-            anchors.centerIn: parent
-            width: Math.min(window.width * 0.8, authButtonsRow.width+20)
+            // anchors.centerIn: parent
+            width: Math.min(window.width * 0.8, authButtonsRow.implicitWidth+20)
             TextField {
                 id: loginField
                 Layout.fillWidth: true
@@ -183,6 +183,13 @@ ApplicationWindow {
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
+                        Rectangle {
+                            visible: app.chat.unreadChatIds.includes(modelData.id)
+                            width: 8
+                            height: 8
+                            radius: 4
+                            color: Material.color(Material.Blue)
+                        }
                         ToolButton {
                             text: "✕"
                             onClicked: app.chat.deleteChat(modelData.id)
@@ -249,6 +256,16 @@ ApplicationWindow {
                             flat: true
                             font.pixelSize: 18
                             onClicked: chatsDrawer.open()
+                            Rectangle {
+                                visible: app.chat.unreadChatIds.length > 0
+                                width: 9
+                                height: 9
+                                radius: 4.5
+                                color: Material.color(Material.Blue)
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 8
+                            }
                         }
 
                         ColumnLayout {
@@ -502,21 +519,35 @@ ApplicationWindow {
                     }
                 }
                 // Нижняя панель ввода внутри ColumnLayout
-                MyFooterBar {
-                    id: footerBar
+                // MyFooterBar {
+                //     id: footerBar
+                //     Layout.fillWidth: true
+                //     // Layout.alignment: Qt.AlignBottom
+                //     // Material.background: window.Material.background
+                //     serverStatus: app.models.serverStatus
+                //     capabilities: app.models.capabilities
+                //     draftAttachments: app.chat.activeDraftAttachments
+                //     onAttachClicked: imagePicker.open()
+                //     onRetryAttachmentClicked: (localId) => app.chat.retryAttachment(localId)
+                //     onRemoveAttachmentClicked: (localId) => app.chat.removeDraftAttachment(localId)
+                //     onSendClicked: (text) => app.chat.sendMessage(text)
+                //     // maxHeight: window.height * 0.45
+                //     Layout.maximumHeight: window.height * 0.45
+                //     // Layout.minimumHeight: Material.delegateHeight
+                //     inactiveColor: Material.dividerColor
+                //     accentColor: Material.accentColor
+                //     textColor: Material.primaryTextColor
+                // }
+
+                ScrollableTextArea {
+                    id: chatText
                     Layout.fillWidth: true
-                    // Layout.alignment: Qt.AlignBottom
-                    // Material.background: window.Material.background
-                    serverStatus: app.models.serverStatus
-                    capabilities: app.models.capabilities
-                    draftAttachments: app.chat.activeDraftAttachments
-                    onAttachClicked: imagePicker.open()
-                    onRetryAttachmentClicked: (localId) => app.chat.retryAttachment(localId)
-                    onRemoveAttachmentClicked: (localId) => app.chat.removeDraftAttachment(localId)
-                    onSendClicked: (text) => app.chat.sendMessage(text)
-                    // maxHeight: window.height * 0.45
-                    Layout.maximumHeight: window.height * 0.45
-                    Layout.minimumHeight: Material.delegateHeight
+                    Layout.maximumHeight: window.height*0.4
+                }
+
+                ChatButtons {
+                    Layout.fillWidth: true
+                    canSend: chatText.text.length >0
                 }
             }
         }

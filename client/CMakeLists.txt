@@ -40,6 +40,8 @@ qt_add_qml_module(appclient
         Main.qml
         MyFooterBar.qml
         Settings.qml
+        ScrollableTextArea.qml
+        ChatButtons.qml
     SOURCES
         PropertyMacros.h
         fileuploader.h fileuploader.cpp

@@ -294,29 +294,35 @@ def _run_vlm_generation(task_id: str, req: ChatRequest):
         manager.tasks[task_id]["error"] = "Out of tokens"
 
 
+def save_incoming_messages(req: ChatRequest):
+    """Сохраняет новые входящие сообщения (user или tool) в БД сразу при приеме запроса."""
+    new_incoming = []
+    for msg in reversed(req.messages):
+        if msg.role == "assistant":
+            break
+        new_incoming.append(msg)
+    new_incoming.reverse()
+
+    for msg in new_incoming:
+        db.add_message(
+            chat_id=req.chat_id,
+            user_uuid=req.user_uuid,
+            role=msg.role,
+            content=msg.content or "",
+            attachments=[a.model_dump() for a in msg.attachments],
+            tool_calls=msg.tool_calls,
+            tool_call_id=msg.tool_call_id,
+        )
+
+
 async def task_generate(task_id: str, req: ChatRequest):
+    manager.status = ServerStatus.GENERATING
+    manager.tasks[task_id]["status"] = "running"
     try:
         existing_msgs = db.get_chat_messages(req.chat_id)
-        is_first_turn = not any(m["role"] == "assistant" and m["content"] for m in existing_msgs)
-
-        # Сохраняем новые входящие сообщения с конца истории (обычно 1 user или пачка tool-ответов)
-        new_incoming = []
-        for msg in reversed(req.messages):
-            if msg.role == "assistant":
-                break
-            new_incoming.append(msg)
-        new_incoming.reverse()
-
-        for msg in new_incoming:
-            db.add_message(
-                chat_id=req.chat_id,
-                user_uuid=req.user_uuid,
-                role=msg.role,
-                content=msg.content or "",
-                attachments=[a.model_dump() for a in msg.attachments],
-                tool_calls=msg.tool_calls,
-                tool_call_id=msg.tool_call_id,
-            )
+        is_first_turn = not any(
+            m["role"] == "assistant" and m["content"] for m in existing_msgs
+        )
 
         committed_ids = db.get_committed_file_ids(req.user_uuid, req.chat_id)
         await asyncio.to_thread(
@@ -340,10 +346,12 @@ async def task_generate(task_id: str, req: ChatRequest):
             tool_calls=tool_calls if tool_calls else None,
         )
 
-        # Авто-нейминг срабатывает после первого полноценного текстового ответа
         chat_title = None
         if is_first_turn and final_res["answer"]:
-            first_user_text = next((m.content or "" for m in req.messages if m.role == "user"), "")
+            first_user_text = next(
+                (m.content or "" for m in req.messages if m.role == "user"),
+                "",
+            )
             chat_title = await asyncio.to_thread(
                 _generate_chat_title_sync,
                 first_user_text,
@@ -361,4 +369,19 @@ async def task_generate(task_id: str, req: ChatRequest):
         manager.tasks[task_id]["status"] = "failed"
         manager.tasks[task_id]["error"] = str(e)
     finally:
-        manager.status = ServerStatus.LOADED
+        # Возвращаем LOADED, если модель не была выгружена
+        if manager.model is not None:
+            manager.status = ServerStatus.LOADED
+        else:
+            manager.status = ServerStatus.IDLE
+
+
+async def generation_worker_loop():
+    """Фоновый консьюмер, строго последовательно выполняющий задачи из очереди на GPU."""
+    while True:
+        task_id, req = await manager.generation_queue.get()
+        try:
+            await task_generate(task_id, req)
+        finally:
+            manager.generation_queue.task_done()
+

@@ -18,9 +18,16 @@ from schemas import (
 from state import manager
 from storage import storage
 from utils import detect_media_type, detect_model_capabilities
-from workers import task_download, task_generate, task_load, task_unload
+from workers import task_download, task_generate, task_load, task_unload, generation_worker_loop, save_incoming_messages
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="MLX Local Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_task = asyncio.create_task(generation_worker_loop())
+    yield
+    worker_task.cancel()
+
+app = FastAPI(title="MLX Local Server", lifespan=lifespan)
 
 
 # --- Пользователи ---
@@ -237,10 +244,9 @@ async def load_model(req: LoadModelRequest):
 
 @app.post("/state/unload", status_code=202)
 async def unload_model():
-    if manager.status != ServerStatus.LOADED:
-        raise HTTPException(
-            409, f"Cannot unload in current state: {manager.status}"
-        )
+    if manager.status != ServerStatus.LOADED or not manager.generation_queue.empty():
+            raise HTTPException(409, f"Cannot unload while status is {manager.status} or queue is not empty")
+
 
     manager.status = ServerStatus.UNLOADING
     task_id = manager.create_task("unload")
@@ -250,14 +256,18 @@ async def unload_model():
 
 @app.post("/chat", status_code=202)
 async def chat(req: ChatRequest):
-    if manager.status != ServerStatus.LOADED:
-        raise HTTPException(
-            409, f"Model is not ready. Current state: {manager.status}"
-        )
+    if manager.status not in (ServerStatus.LOADED, ServerStatus.GENERATING):
+        raise HTTPException(409, f"Model is not ready. Current status: {manager.status}")
+    if not req.messages:
+        raise HTTPException(400, "Messages list cannot be empty")
 
-    manager.status = ServerStatus.GENERATING
-    task_id = manager.create_task(
-        "generate", initial_result={"think": None, "answer": ""}
-    )
-    asyncio.create_task(task_generate(task_id, req))
-    return {"task_id": task_id}
+    # Сохраняем входящее сообщение сразу, чтобы при смене вкладки оно уже было в истории
+    try:
+        save_incoming_messages(req)
+    except IntegrityError:
+        raise HTTPException(401, "User or chat not found. Please log in again.")
+
+    task_id = manager.create_task("generate", initial_status="queued")
+    await manager.generation_queue.put((task_id, req))
+    return {"task_id": task_id, "status": "queued"}
+

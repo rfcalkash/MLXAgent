@@ -15,7 +15,7 @@ ChatController::ChatController(RestTransport* transport, QObject* parent)
     , m_pollTimer(new QTimer(this))
 {
     m_pollTimer->setInterval(1000);
-    connect(m_pollTimer, &QTimer::timeout, this, &ChatController::pollGenerationTask);
+    connect(m_pollTimer, &QTimer::timeout, this, &ChatController::pollActiveTasks);
     connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeDraftAttachmentsChanged);
     connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeChatTitleChanged);
     connect(this, &ChatController::chatsChanged, this, &ChatController::activeChatTitleChanged);
@@ -29,6 +29,21 @@ void ChatController::setToolsProvider(ToolsProvider provider)
 QString ChatController::formatContent(const QString& content, const QColor& textColor, double fontSizePt)
 {
     return MathFormatter::toRichHtml(content, textColor, fontSizePt);
+}
+
+QString ChatController::activeChatTitle() const
+{
+    if (m_activeChatId.isEmpty())
+        return QStringLiteral("Новый чат");
+
+    for (const auto& item : m_chats) {
+        const auto map = item.toMap();
+        if (map.value("id").toString() == m_activeChatId) {
+            const QString title = map.value("title").toString();
+            return title.isEmpty() ? QStringLiteral("Чат") : title;
+        }
+    }
+    return QStringLiteral("Чат");
 }
 
 QVariantList ChatController::activeDraftAttachments() const
@@ -45,6 +60,24 @@ QVariantList ChatController::activeDraftAttachments() const
     return filtered;
 }
 
+void ChatController::markChatUnread(const QString& chatId)
+{
+    if (chatId.isEmpty() || chatId == m_activeChatId)
+        return;
+
+    if (!m_unreadChatIds.contains(chatId)) {
+        m_unreadChatIds.append(chatId);
+        emit unreadChatIdsChanged();
+    }
+}
+
+void ChatController::markChatRead(const QString& chatId)
+{
+    if (m_unreadChatIds.removeAll(chatId) > 0) {
+        emit unreadChatIdsChanged();
+    }
+}
+
 void ChatController::setUserUuid(const QString& userUuid)
 {
     if (m_userUuid == userUuid)
@@ -54,11 +87,16 @@ void ChatController::setUserUuid(const QString& userUuid)
     m_chats.clear();
     m_activeChatId.clear();
     m_allDrafts.clear();
+    m_unreadChatIds.clear();
+    m_activeTasks.clear();
+    m_toolTurnDepths.clear();
+    m_pollTimer->stop();
     m_chatModel->clear();
 
     emit chatsChanged();
     emit activeChatIdChanged();
     emit activeDraftAttachmentsChanged();
+    emit unreadChatIdsChanged();
 
     if (!m_userUuid.isEmpty()) {
         fetchChats();
@@ -81,7 +119,7 @@ void ChatController::fetchChats()
 
     m_transport->send("GET", "/chats", { }, [this](const QJsonObject& res) {
         m_chats.clear();
-        foreach (const auto& v, res["chats"].toArray()) {
+        for (const auto& v : res["chats"].toArray()) {
             m_chats.append(v.toObject().toVariantMap());
         }
         emit chatsChanged(); }, nullptr, q);
@@ -105,14 +143,18 @@ void ChatController::selectChat(const QString& chatId)
         return;
 
     m_activeChatId = chatId;
+    markChatRead(chatId);
     emit activeChatIdChanged();
 
     m_transport->send("GET", "/chats/" + chatId, { }, [this, chatId](const QJsonObject& res) {
+        if (m_activeChatId != chatId)
+            return;
+
         m_chatModel->clear();
-        foreach (const auto& val, res["messages"].toArray()) {
+        for (const auto& val : res["messages"].toArray()) {
             const auto obj = val.toObject();
             QVariantList atts;
-            foreach (const auto& a, obj["attachments"].toArray()) {
+            for (const auto& a : obj["attachments"].toArray()) {
                 const auto aObj = a.toObject();
                 const QString fid = aObj["file_id"].toString();
                 atts.append(QVariantMap {
@@ -127,6 +169,11 @@ void ChatController::selectChat(const QString& chatId)
                 .attachments = atts,
                 .toolCalls = obj["tool_calls"].toArray(),
                 .toolCallId = obj["tool_call_id"].toString() });
+        }
+
+        // Если в этом чате еще идет/стоит в очереди генерация — добавляем плейсхолдер ответа
+        if (m_activeTasks.contains(chatId)) {
+            m_chatModel->appendMessage({ .role = "assistant" });
         }
     });
 }
@@ -145,6 +192,9 @@ void ChatController::deleteChat(const QString& chatId)
             }
         }
         emit activeDraftAttachmentsChanged();
+        markChatRead(chatId);
+        m_activeTasks.remove(chatId);
+        m_toolTurnDepths.remove(chatId);
 
         if (m_activeChatId == chatId) {
             m_activeChatId.clear();
@@ -268,71 +318,59 @@ void ChatController::removeDraftAttachment(const QString& localId)
         m_transport->send("DELETE", QString("/files/%1/%2/%3").arg(m_userUuid, targetChatId, fileId), { }, nullptr, [](const QString&) { });
     }
 }
-
 void ChatController::onUploadProgress(const QString& localId, double progress)
 {
     const int idx = findDraftIndex(localId);
     if (idx < 0)
         return;
-
     QVariantMap item = m_allDrafts[idx].toMap();
     item["progress"] = progress;
     m_allDrafts[idx] = item;
-
     if (item["chatId"].toString() == m_activeChatId) {
         emit activeDraftAttachmentsChanged();
     }
 }
-
 void ChatController::onUploadSucceeded(const QString& localId, const QJsonObject& response)
 {
     const QString fileId = response["file_id"].toString();
     const int idx = findDraftIndex(localId);
     if (idx < 0)
         return;
-
     QVariantMap item = m_allDrafts[idx].toMap();
     const QString targetChatId = item["chatId"].toString();
-
     item["status"] = "ready";
     item["progress"] = 1.0;
     item["fileId"] = fileId;
     item["mediaType"] = response["media_type"].toString();
     item["remoteUrl"] = buildFileUrl(targetChatId, fileId);
     m_allDrafts[idx] = item;
-
     if (targetChatId == m_activeChatId) {
         emit activeDraftAttachmentsChanged();
     }
 }
-
 void ChatController::onUploadFailed(const QString& localId, const QString& error)
 {
     const int idx = findDraftIndex(localId);
     if (idx < 0)
         return;
-
     QVariantMap item = m_allDrafts[idx].toMap();
     item["status"] = "error";
     item["error"] = error;
     m_allDrafts[idx] = item;
-
     if (item["chatId"].toString() == m_activeChatId) {
         emit activeDraftAttachmentsChanged();
     }
     emit errorOccurred(error);
 }
-
-// --- Отправка сообщения, цикл Tool Calling и поллинг ответа ---
-
+// --- Отправка сообщения (с поддержкой очереди), Tool Calling и поллинг ---
 void ChatController::sendMessage(const QString& text)
 {
     if (m_userUuid.isEmpty())
         return;
     if (text.trimmed().isEmpty() && activeDraftAttachments().isEmpty())
         return;
-    m_toolTurnDepth = 0;
     auto dispatchChat = [this, text](const QString& targetChatId) {
+        m_toolTurnDepths[targetChatId] = 0;
         QVariantList readyAtts;
         for (int i = m_allDrafts.size() - 1; i >= 0; --i) {
             const auto map = m_allDrafts[i].toMap();
@@ -344,11 +382,17 @@ void ChatController::sendMessage(const QString& text)
                 m_allDrafts.removeAt(i);
             }
         }
-        emit activeDraftAttachmentsChanged();
-        m_chatModel->appendMessage({ .role = "user",
-            .content = text,
-            .attachments = readyAtts });
-        sendChatPayload(targetChatId);
+        if (targetChatId == m_activeChatId) {
+            emit activeDraftAttachmentsChanged();
+            m_chatModel->appendMessage({ .role = "user",
+                .content = text,
+                .attachments = readyAtts });
+        }
+        const QJsonArray msgArray = m_chatModel->toApiMessages();
+        if (targetChatId == m_activeChatId) {
+            m_chatModel->appendMessage({ .role = "assistant" });
+        }
+        sendChatPayload(targetChatId, msgArray);
     };
     if (m_activeChatId.isEmpty()) {
         m_transport->send("POST", "/chats", { { "user_uuid", m_userUuid } }, [this, dispatchChat](const QJsonObject& res) {
@@ -361,10 +405,8 @@ void ChatController::sendMessage(const QString& text)
         dispatchChat(m_activeChatId);
     }
 }
-void ChatController::sendChatPayload(const QString& targetChatId)
+void ChatController::sendChatPayload(const QString& targetChatId, const QJsonArray& msgArray)
 {
-    const QJsonArray msgArray = m_chatModel->toApiMessages();
-    m_chatModel->appendMessage({ .role = "assistant" });
     QJsonObject body {
         { "user_uuid", m_userUuid },
         { "chat_id", targetChatId },
@@ -377,75 +419,105 @@ void ChatController::sendChatPayload(const QString& targetChatId)
             body["tools"] = tools;
         }
     }
-    m_transport->send("POST", "/chat", body, [this](const QJsonObject& res) {
-        m_currentTaskId = res["task_id"].toString();
+    m_transport->send("POST", "/chat", body, [this, targetChatId](const QJsonObject& res) {
+        m_activeTasks[targetChatId] = res["task_id"].toString();
         emit generationStarted();
-        m_pollTimer->start();
+        if (!m_pollTimer->isActive()) {
+            m_pollTimer->start();
+        }
     });
 }
 void ChatController::onToolBatchCompleted(const QString& chatId, const QJsonArray& toolResultMessages)
 {
-    if (chatId != m_activeChatId)
-        return;
-    for (const auto& val : toolResultMessages) {
-        const auto obj = val.toObject();
-        m_chatModel->appendMessage({ .role = "tool",
-            .content = obj["content"].toString(),
-            .toolCallId = obj["tool_call_id"].toString() });
-    }
-    m_toolTurnDepth++;
-    sendChatPayload(chatId);
+    // Подтягиваем актуальную историю чата из БД (даже если юзер переключил вкладку во время клика)
+    m_transport->send("GET", "/chats/" + chatId, { }, [this, chatId, toolResultMessages](const QJsonObject& res) {
+        QJsonArray historyArr;
+        for (const auto& val : res["messages"].toArray()) {
+            const auto obj = val.toObject();
+            QJsonObject msgObj {
+                { "role", obj["role"].toString() },
+                { "content", obj["content"].toString() }
+            };
+            QJsonArray atts;
+            for (const auto& a : obj["attachments"].toArray()) {
+                const auto aObj = a.toObject();
+                atts.append(QJsonObject { { "type", aObj["type"].toString() }, { "file_id", aObj["file_id"].toString() } });
+            }
+            if (!atts.isEmpty())
+                msgObj["attachments"] = atts;
+            if (!obj["tool_calls"].toArray().isEmpty())
+                msgObj["tool_calls"] = obj["tool_calls"].toArray();
+            if (!obj["tool_call_id"].toString().isEmpty())
+                msgObj["tool_call_id"] = obj["tool_call_id"].toString();
+            historyArr.append(msgObj);
+        }
+        for (const auto& tVal : toolResultMessages) {
+            historyArr.append(tVal.toObject());
+            if (chatId == m_activeChatId) {
+                const auto tObj = tVal.toObject();
+                m_chatModel->appendMessage({ .role = "tool",
+                    .content = tObj["content"].toString(),
+                    .toolCallId = tObj["tool_call_id"].toString() });
+            }
+        }
+        if (chatId == m_activeChatId) {
+            m_chatModel->appendMessage({ .role = "assistant" });
+        }
+        m_toolTurnDepths[chatId] = m_toolTurnDepths.value(chatId, 0) + 1;
+        sendChatPayload(chatId, historyArr);
+    });
 }
-void ChatController::pollGenerationTask()
+void ChatController::pollActiveTasks()
 {
-    if (m_currentTaskId.isEmpty()) {
+    if (m_activeTasks.isEmpty()) {
         m_pollTimer->stop();
         return;
     }
-    m_transport->send("GET", "/tasks/" + m_currentTaskId, { }, [this](const QJsonObject& obj) {
-        const QString status = obj["status"].toString();
-        const QString type = obj["type"].toString();
-        const QJsonObject result = obj["result"].toObject();
-        if (type == "generate" && (status == "running" || status == "completed")) {
-            const QString warning = (status == "completed" && !obj["error"].isNull())
-                ? obj["error"].toString()
-                : QString();
-            const QJsonArray toolCalls = result["tool_calls"].toArray();
-            m_chatModel->updateLastAssistantMessage(
-                result["think"].toString(),
-                result["answer"].toString(),
-                warning,
-                toolCalls);
-        }
-        if (status == "completed") {
-            m_pollTimer->stop();
-            m_currentTaskId.clear();
-            const QJsonArray toolCalls = result["tool_calls"].toArray();
-            if (!toolCalls.isEmpty() && m_toolTurnDepth < MAX_TOOL_TURN_DEPTH) {
-                emit toolCallsRequested(m_activeChatId, toolCalls);
-            } else {
-                fetchChats();
-                emit generationFinished();
+    const auto keys = m_activeTasks.keys();
+    for (const QString& chatId : keys) {
+        const QString taskId = m_activeTasks.value(chatId);
+        if (taskId.isEmpty())
+            continue;
+        m_transport->send("GET", "/tasks/" + taskId, { }, [this, chatId, taskId](const QJsonObject& obj) {
+            // Защита от гонки: задача могла быть уже обработана предыдущим тиком
+            if (m_activeTasks.value(chatId) != taskId)
+                return;
+            const QString status = obj["status"].toString();
+            const QJsonObject result = obj["result"].toObject();
+            if (chatId == m_activeChatId) {
+                if (status == "queued") {
+                    m_chatModel->updateLastAssistantMessage(QString(), QStringLiteral("⏳ В очереди на генерацию..."));
+                } else if (status == "running" || status == "completed") {
+                    const QString warning = (status == "completed" && !obj["error"].isNull())
+                        ? obj["error"].toString()
+                        : QString();
+                    m_chatModel->updateLastAssistantMessage(
+                        result["think"].toString(),
+                        result["answer"].toString(),
+                        warning,
+                        result["tool_calls"].toArray());
+                }
             }
-        } else if (status == "failed") {
-            m_pollTimer->stop();
-            m_currentTaskId.clear();
-            emit errorOccurred("Ошибка генерации: " + obj["error"].toString());
-            emit generationFinished();
-        }
-    });
-}
-QString ChatController::activeChatTitle() const
-{
-    if (m_activeChatId.isEmpty())
-        return QStringLiteral("Новый чат");
-
-    for (const auto& item : m_chats) {
-        const auto map = item.toMap();
-        if (map.value("id").toString() == m_activeChatId) {
-            const QString title = map.value("title").toString();
-            return title.isEmpty() ? QStringLiteral("Чат") : title;
-        }
+            if (status == "completed") {
+                m_activeTasks.remove(chatId);
+                const QJsonArray toolCalls = result["tool_calls"].toArray();
+                const int depth = m_toolTurnDepths.value(chatId, 0);
+                if (!toolCalls.isEmpty() && depth < MAX_TOOL_TURN_DEPTH) {
+                    emit toolCallsRequested(chatId, toolCalls);
+                } else {
+                    markChatUnread(chatId);
+                    fetchChats();
+                    if (m_activeTasks.isEmpty()) {
+                        emit generationFinished();
+                    }
+                }
+            } else if (status == "failed") {
+                m_activeTasks.remove(chatId);
+                emit errorOccurred("Ошибка генерации: " + obj["error"].toString());
+                if (m_activeTasks.isEmpty()) {
+                    emit generationFinished();
+                }
+            }
+        });
     }
-    return QStringLiteral("Чат");
 }
