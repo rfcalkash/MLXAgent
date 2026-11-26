@@ -25,6 +25,7 @@ class ChatController : public QObject {
     Q_PROPERTY(QString activeChatTitle READ activeChatTitle NOTIFY activeChatTitleChanged)
     Q_PROPERTY(QVariantList activeDraftAttachments READ activeDraftAttachments NOTIFY activeDraftAttachmentsChanged)
     Q_PROPERTY(ChatModel* model READ model CONSTANT)
+    Q_PROPERTY(bool isCurrentChatGenerating READ isCurrentChatGenerating NOTIFY activeTasksChanged)
 
 public:
     using ToolsProvider = std::function<QJsonArray()>;
@@ -36,6 +37,10 @@ public:
     QString activeChatTitle() const;
     void setUserUuid(const QString& userUuid);
     void setToolsProvider(ToolsProvider provider);
+
+    bool isCurrentChatGenerating() const;
+    Q_INVOKABLE void stopCurrentChat();
+    Q_INVOKABLE void forceStopServerGeneration();
 
     Q_INVOKABLE void fetchChats();
     Q_INVOKABLE void createNewChat();
@@ -60,6 +65,7 @@ signals:
     void errorOccurred(const QString& message);
     void generationStarted();
     void generationFinished();
+    void activeTasksChanged();
     void toolCallsRequested(const QString& chatId, const QJsonArray& toolCalls);
 
 private slots:

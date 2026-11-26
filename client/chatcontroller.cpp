@@ -19,6 +19,39 @@ ChatController::ChatController(RestTransport* transport, QObject* parent)
     connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeDraftAttachmentsChanged);
     connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeChatTitleChanged);
     connect(this, &ChatController::chatsChanged, this, &ChatController::activeChatTitleChanged);
+    connect(this, &ChatController::activeChatIdChanged, this, &ChatController::activeTasksChanged);
+}
+
+bool ChatController::isCurrentChatGenerating() const
+{
+    return !m_activeChatId.isEmpty() && m_activeTasks.contains(m_activeChatId);
+}
+
+void ChatController::stopCurrentChat()
+{
+    if (m_activeChatId.isEmpty())
+        return;
+
+    const QString targetChatId = m_activeChatId;
+    m_transport->send("POST", "/chat/stop", { { "chat_id", targetChatId } }, [this, targetChatId](const QJsonObject& res) {
+        if (res["target"].toString() == "queued") {
+            m_activeTasks.remove(targetChatId);
+            emit activeTasksChanged();
+            emit activeTasksChanged();
+            if (targetChatId == m_activeChatId) {
+                m_chatModel->updateLastAssistantMessage(QString(), QString(), QStringLiteral("Отменено в очереди"));
+            }
+            if (m_activeTasks.isEmpty()) {
+                emit generationFinished();
+            }
+        }
+        // Если target == "running", таск сам завершится в течение ~50 мс с warning = "Stopped by user"
+    });
+}
+
+void ChatController::forceStopServerGeneration()
+{
+    m_transport->send("POST", "/chat/stop", { { "chat_id", QJsonValue::Null } });
 }
 
 void ChatController::setToolsProvider(ToolsProvider provider)
@@ -97,6 +130,7 @@ void ChatController::setUserUuid(const QString& userUuid)
     emit activeChatIdChanged();
     emit activeDraftAttachmentsChanged();
     emit unreadChatIdsChanged();
+    emit activeTasksChanged();
 
     if (!m_userUuid.isEmpty()) {
         fetchChats();
@@ -119,10 +153,26 @@ void ChatController::fetchChats()
 
     m_transport->send("GET", "/chats", { }, [this](const QJsonObject& res) {
         m_chats.clear();
+        bool tasksUpdated = false;
         for (const auto& v : res["chats"].toArray()) {
-            m_chats.append(v.toObject().toVariantMap());
+            const auto obj = v.toObject();
+            m_chats.append(obj.toVariantMap());
+
+            const QString cid = obj["id"].toString();
+            const QString activeTid = obj["active_task_id"].toString();
+            if (!activeTid.isEmpty() && !m_activeTasks.contains(cid)) {
+                m_activeTasks[cid] = activeTid;
+                emit activeTasksChanged();
+                tasksUpdated = true;
+            }
         }
-        emit chatsChanged(); }, nullptr, q);
+        emit chatsChanged();
+        if (tasksUpdated) {
+            emit activeTasksChanged();
+            if (!m_pollTimer->isActive()) {
+                m_pollTimer->start();
+            }
+        } }, nullptr, q);
 }
 
 void ChatController::createNewChat()
@@ -194,6 +244,7 @@ void ChatController::deleteChat(const QString& chatId)
         emit activeDraftAttachmentsChanged();
         markChatRead(chatId);
         m_activeTasks.remove(chatId);
+        emit activeTasksChanged();
         m_toolTurnDepths.remove(chatId);
 
         if (m_activeChatId == chatId) {
@@ -421,6 +472,7 @@ void ChatController::sendChatPayload(const QString& targetChatId, const QJsonArr
     }
     m_transport->send("POST", "/chat", body, [this, targetChatId](const QJsonObject& res) {
         m_activeTasks[targetChatId] = res["task_id"].toString();
+        emit activeTasksChanged();
         emit generationStarted();
         if (!m_pollTimer->isActive()) {
             m_pollTimer->start();
@@ -500,6 +552,7 @@ void ChatController::pollActiveTasks()
             }
             if (status == "completed") {
                 m_activeTasks.remove(chatId);
+                emit activeTasksChanged();
                 const QJsonArray toolCalls = result["tool_calls"].toArray();
                 const int depth = m_toolTurnDepths.value(chatId, 0);
                 if (!toolCalls.isEmpty() && depth < MAX_TOOL_TURN_DEPTH) {
@@ -513,6 +566,7 @@ void ChatController::pollActiveTasks()
                 }
             } else if (status == "failed") {
                 m_activeTasks.remove(chatId);
+                emit activeTasksChanged();
                 emit errorOccurred("Ошибка генерации: " + obj["error"].toString());
                 if (m_activeTasks.isEmpty()) {
                     emit generationFinished();

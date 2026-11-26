@@ -42,6 +42,9 @@ qt_add_qml_module(appclient
         Settings.qml
         ScrollableTextArea.qml
         ChatButtons.qml
+        ToolButtonRotatableIcon.qml
+        AttachmentDelegate.qml
+        RoundProgressBar.qml
     SOURCES
         PropertyMacros.h
         fileuploader.h fileuploader.cpp
@@ -54,6 +57,15 @@ qt_add_qml_module(appclient
         appcontext.h appcontext.cpp
         webfetcher.h webfetcher.cpp
         toolcontroller.h toolcontroller.cpp
+        RESOURCES icons/menu.svg
+        icons/send.svg
+        icons/paperclip.svg
+        icons/gear.svg
+        icons/user.svg
+        icons/arrow_left.svg
+        icons/chevron.svg
+        icons/trash.svg
+        icons/stop.svg
 )
 
 

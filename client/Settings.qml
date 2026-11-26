@@ -26,6 +26,7 @@ Page {
     signal unloadModelClicked()
     signal downloadModelClicked()
     signal deleteModelClicked(string modelId)
+    signal forceStopClicked()
 
     onServerUrlChanged: urlField.text = serverUrl
     onActiveModelIndexChanged: modelSelector.currentIndex = activeModelIndex
@@ -193,7 +194,15 @@ Page {
                                 var selectedId = settingsPage.models[modelSelector.currentIndex].id
                                 settingsPage.deleteModelClicked(selectedId)
                             }
-                        }
+                        }                        
+                    }
+                    Button {
+                        text: "⏹ Остановить текущую генерацию на сервере"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.rightMargin: 12
+                        visible: settingsPage.serverStatus === "GENERATING"
+                        onClicked: settingsPage.forceStopClicked()
                     }
                 }
             }

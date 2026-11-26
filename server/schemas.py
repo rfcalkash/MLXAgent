@@ -58,4 +58,9 @@ class ChatRequest(BaseModel):
     tools: Optional[list[dict[str, Any]]] = None
     max_tokens: int = 16000
     temp: float = 0.7
+    repetition_penalty: float = 1.05
     enable_thinking: bool = True
+
+
+class StopChatRequest(BaseModel):
+    chat_id: Optional[str] = None

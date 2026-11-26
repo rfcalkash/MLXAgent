@@ -12,6 +12,7 @@ dependencies = [
     "mlx-vlm>=0.8.0",
     "pillow>=13.0.0",
     "pydantic>=2.14.4",
+    "pymupdf>=2.2",
     "python-multipart>=0.0.34",
     "uvicorn>=0.54.0",
 ]

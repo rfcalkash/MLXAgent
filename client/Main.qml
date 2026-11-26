@@ -130,12 +130,15 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 RoundButton {
-                    text: "←"
+                    icon.source: "icons/arrow_left.svg"
                     flat: true
                     onClicked: chatsDrawer.close()
                 }
+                Image {
+                    source: "icons/user.svg"
+                }
                 Label {
-                    text: "👤 " + app.auth.userLogin
+                    text: app.auth.userLogin
                     font.bold: true
                     Layout.fillWidth: true
                 }
@@ -228,6 +231,7 @@ ApplicationWindow {
             onUnloadModelClicked: app.models.unloadModel()
             onDownloadModelClicked: downloadDialog.open()
             onDeleteModelClicked: (modelId) => app.models.deleteModel(modelId)
+            onForceStopClicked: app.chat.forceStopServerGeneration()
         }
     }
 
@@ -235,6 +239,74 @@ ApplicationWindow {
     Component {
         id: chatPageComponent
         Page {
+
+            Drawer {
+                id: attachmentsDrawer
+                edge: Qt.BottomEdge
+                // Исправлено implicitWidth -> implicitHeight + добавлен запас на случай пустого списка
+                height: Math.min(parent.height * 0.7, mainLayout.implicitHeight)
+                width: parent.width
+
+                ColumnLayout {
+                    id: mainLayout
+                    anchors.fill: parent
+
+                    ScrollView {
+                        id: attachmentsContainer
+                        visible: app.chat.activeDraftAttachments.length > 0
+                        Layout.fillHeight: true
+                        Layout.fillWidth: true
+                        // Задаём базовую высоту, чтобы implicitHeight у ColumnLayout не схлопнулся в 0
+                        Layout.preferredHeight: attachmentsFlow.implicitHeight+Material.frameVerticalPadding*2
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: contentHeight>height? ScrollBar.AlwaysOn :ScrollBar.AsNeeded
+
+                        Flow {
+                            id: attachmentsFlow
+                            // Берем доступную ширину самого ScrollView, а не parent.width
+                            width: attachmentsContainer.availableWidth - Material.frameVerticalPadding * 2
+                            x: Material.frameVerticalPadding
+                            spacing: 8 // Рекомендуется добавить отступы между элементами
+
+                            Repeater {
+                                model: app.chat.activeDraftAttachments
+                                delegate: AttachmentDelegate {
+                                    attachmentData: modelData
+                                    onRemoveRequested: app.chat.removeDraftAttachment(modelData.localId)
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        visible: !attachmentsContainer.visible
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredHeight: window.height / 3
+
+                        Label {
+                            text: "Пока ничего нет"
+                            anchors.centerIn: parent
+                            width: Math.min(contentWidth, window.width * 0.8)
+                            wrapMode: Text.WordWrap
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+
+                    Rectangle {
+                        height: 1
+                        color: Material.dividerColor
+                        Layout.fillWidth: true
+                    }
+
+                    Button{
+                        text: "Добавить"
+                        Layout.alignment: Qt.AlignHCenter
+                        onClicked: imagePicker.open()
+                    }
+                }
+            }
+
             Material.background: window.Material.background
 
             ColumnLayout {
@@ -252,9 +324,8 @@ ApplicationWindow {
                         anchors.rightMargin: 4
 
                         RoundButton {
-                            text: "☰"
+                            icon.source: "icons/menu.svg"
                             flat: true
-                            font.pixelSize: 18
                             onClicked: chatsDrawer.open()
                             Rectangle {
                                 visible: app.chat.unreadChatIds.length > 0
@@ -306,9 +377,8 @@ ApplicationWindow {
                         }
 
                         RoundButton {
-                            text: "⚙"
+                            icon.source: "icons/gear.svg"
                             flat: true
-                            font.pixelSize: 18
                             onClicked: stackView.push(settingsPageComponent)
                         }
                     }
@@ -381,9 +451,11 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                                ToolButton {
+                                ToolButtonRotatableIcon {
                                     visible: !isUser && !isToolResult && hasThink
-                                    text: thinkExpanded ? "▼ Скрыть рассуждения" : "▶ Ход мыслей..."
+                                    icon.source: "icons/chevron.svg"
+                                    iconAngle: thinkExpanded ? 90 : 0
+                                    text: thinkExpanded ? "Скрыть рассуждения" : "Ход мыслей..."
                                     flat: true
                                     font.pixelSize: 12
                                     Layout.preferredHeight: 24
@@ -433,9 +505,11 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                                ToolButton {
+                                ToolButtonRotatableIcon {
                                     visible: isToolResult
-                                    text: toolResultExpanded ? "▼ Скрыть вывод инструмента" : "▶ Результат инструмента (" + content.length + " симв.)"
+                                    icon.source: "icons/chevron.svg"
+                                    iconAngle: toolResultExpanded ? 90 : 0
+                                    text: toolResultExpanded ? "Скрыть вывод инструмента" : "Результат инструмента (" + content.length + " симв.)"
                                     font.pixelSize: 12
                                     Material.foreground: "#80CBC4"
                                     Layout.preferredHeight: 24
@@ -543,12 +617,25 @@ ApplicationWindow {
                     id: chatText
                     Layout.fillWidth: true
                     Layout.maximumHeight: window.height*0.4
+                    Layout.leftMargin: Material.frameVerticalPadding
+                    Layout.rightMargin: Material.frameVerticalPadding
                 }
 
                 ChatButtons {
                     Layout.fillWidth: true
                     canSend: chatText.text.length >0
-                    onSendClicked: app.chat.sendMessage(chatText.text)
+                    sending: app.chat.isCurrentChatGenerating
+                    onSendClicked: {
+                        if(sending) app.chat.stopCurrentChat()
+                        else {
+                            app.chat.sendMessage(chatText.text)
+                            chatText.text = ""
+                        }
+                    }
+                    attachmentsCount: app.chat.activeDraftAttachments.length
+                    showAttachments: app.models.capabilities.includes("image")
+                    onAttachClicked: attachmentsDrawer.open()
+                    Layout.margins: Material.frameVerticalPadding
                 }
             }
         }

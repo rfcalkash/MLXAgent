@@ -14,10 +14,11 @@ from schemas import (
     LoadModelRequest,
     ServerStatus,
     UserAuthRequest,
+    StopChatRequest
 )
 from state import manager
 from storage import storage
-from utils import detect_media_type, detect_model_capabilities
+from utils import detect_media_type, detect_model_capabilities, UnreadableScanPdfError, process_document_attachment
 from workers import task_download, task_generate, task_load, task_unload, generation_worker_loop, save_incoming_messages
 from contextlib import asynccontextmanager
 
@@ -63,7 +64,11 @@ def create_chat(req: CreateChatRequest):
 
 @app.get("/chats")
 def list_chats(user_uuid: str):
-    return {"chats": db.get_user_chats(user_uuid)}
+    chats = db.get_user_chats(user_uuid)
+    for c in chats:
+        c["active_task_id"] = manager.get_chat_active_task_id(c["id"])
+    return {"chats": chats}
+
 
 
 @app.get("/chats/{chat_id}")
@@ -86,10 +91,12 @@ async def upload_file_simple(
 ):
     filename = file.filename or "upload.bin"
     file_id = storage.save_stream(user_uuid, chat_id, filename, file.file)
+    saved_path = storage.get_file_path(user_uuid, chat_id, file_id)
     return {
         "file_id": file_id,
-        "media_type": detect_media_type(filename, file.content_type or ""),
+        "media_type": detect_media_type(filename, file.content_type or "", saved_path),
     }
+
 
 
 @app.get("/files/status")
@@ -126,9 +133,10 @@ async def complete_chunked_upload(req: CompleteUploadRequest):
             req.upload_id,
             req.filename,
         )
+        saved_path = storage.get_file_path(req.user_uuid, req.chat_id, file_id)
         return {
             "file_id": file_id,
-            "media_type": detect_media_type(req.filename),
+            "media_type": detect_media_type(req.filename, file_path=saved_path),
         }
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
@@ -244,7 +252,7 @@ async def load_model(req: LoadModelRequest):
 
 @app.post("/state/unload", status_code=202)
 async def unload_model():
-    if manager.status != ServerStatus.LOADED or not manager.generation_queue.empty():
+    if manager.status != ServerStatus.LOADED or manager.generation_queue:
             raise HTTPException(409, f"Cannot unload while status is {manager.status} or queue is not empty")
 
 
@@ -261,13 +269,51 @@ async def chat(req: ChatRequest):
     if not req.messages:
         raise HTTPException(400, "Messages list cannot be empty")
 
-    # Сохраняем входящее сообщение сразу, чтобы при смене вкладки оно уже было в истории
     try:
+        last_msg = req.messages[-1]
+        if last_msg.role == "user":
+            for att in last_msg.attachments:
+                if att.type == "document":
+                    resolved = storage.get_file_path(req.user_uuid, req.chat_id, att.file_id)
+                    if resolved:
+                        try:
+                            process_document_attachment(resolved, is_vlm=manager.is_vlm, temp_dir=None)
+                        except UnreadableScanPdfError as e:
+                            raise HTTPException(422, str(e))
+
         save_incoming_messages(req)
     except IntegrityError:
         raise HTTPException(401, "User or chat not found. Please log in again.")
 
     task_id = manager.create_task("generate", initial_status="queued")
-    await manager.generation_queue.put((task_id, req))
+    async with manager.queue_condition:
+        manager.generation_queue.append((task_id, req))
+        manager.queue_condition.notify()
     return {"task_id": task_id, "status": "queued"}
 
+@app.post("/chat/stop")
+async def stop_chat(req: StopChatRequest):
+    # 1. Если chat_id не передан — принудительно обрываем текущую генерацию на GPU
+    if not req.chat_id:
+        if manager.status == ServerStatus.GENERATING and manager.current_gen_task_id:
+            manager.cancel_event.set()
+            return {"stopped": True, "target": "current_gpu_task", "task_id": manager.current_gen_task_id}
+        return {"stopped": False, "detail": "No active GPU generation"}
+
+    # 2. Если chat_id передан — сначала ищем и удаляем последнюю задачу этого чата из очереди
+    async with manager.queue_condition:
+        for idx in range(len(manager.generation_queue) - 1, -1, -1):
+            tid, queued_req = manager.generation_queue[idx]
+            if queued_req.chat_id == req.chat_id:
+                del manager.generation_queue[idx]
+                if tid in manager.tasks:
+                    manager.tasks[tid]["status"] = "cancelled"
+                    manager.tasks[tid]["error"] = "Cancelled in queue"
+                return {"stopped": True, "target": "queued", "task_id": tid}
+
+    # 3. Если в очереди задач этого чата нет, проверяем, не генерируется ли он прямо сейчас на GPU
+    if manager.status == ServerStatus.GENERATING and manager.current_gen_chat_id == req.chat_id:
+        manager.cancel_event.set()
+        return {"stopped": True, "target": "running", "task_id": manager.current_gen_task_id}
+
+    return {"stopped": False, "detail": "No active or queued task for this chat"}

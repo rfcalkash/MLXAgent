@@ -13,6 +13,7 @@ RowLayout {
     property alias showAttachments: attachButton.visible
     property alias canSend: sendButton.enabled
     property int attachmentsCount: 0
+    property bool sending: false
     spacing: 4
     
     // Кнопка "Добавить"
@@ -20,7 +21,8 @@ RowLayout {
         id: attachButton
         visible: root.showAttachments
         // flat: true
-        icon.name: "image-add"
+        enabled: !sending
+        icon.source: "icons/paperclip.svg"
         // icon.color: root.accentColor
         onClicked: root.attachClicked()
         Rectangle{
@@ -50,7 +52,7 @@ RowLayout {
     RoundButton {
         id: sendButton
         // flat: true
-        icon.name: "media-send"
+        icon.source: root.sending ?"icons/stop.svg": "icons/send.svg"
         // icon.color: enabled ? root.accentColor : root.inactiveColor
         // enabled: inputField.text.length > 0 || draftAttachments.length > 0
         onClicked: {
