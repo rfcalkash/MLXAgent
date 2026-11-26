@@ -198,3 +198,4 @@ server/.python-version
 /server/storage
 /client/.qtcreator
 /state
+*.autosave

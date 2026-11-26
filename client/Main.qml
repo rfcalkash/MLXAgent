@@ -548,6 +548,7 @@ ApplicationWindow {
                 ChatButtons {
                     Layout.fillWidth: true
                     canSend: chatText.text.length >0
+                    onSendClicked: app.chat.sendMessage(chatText.text)
                 }
             }
         }
