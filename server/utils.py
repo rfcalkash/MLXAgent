@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Any
 from huggingface_hub import scan_cache_dir
 import mimetypes
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 
 MAX_VLM_PDF_IMAGE_PAGES = 10
 MIN_SIGNIFICANT_IMG_PX = 150
@@ -281,7 +281,7 @@ def parse_model_output(raw_text: str) -> dict[str, Any]:
         "tool_calls": tool_calls,
     }
 
-def _page_has_visual_content(page: fitz.Page) -> bool:
+def _page_has_visual_content(page: pymupdf.Page) -> bool:
     for img in page.get_image_info():
         if img.get("width", 0) >= MIN_SIGNIFICANT_IMG_PX and img.get("height", 0) >= MIN_SIGNIFICANT_IMG_PX:
             return True
@@ -306,7 +306,7 @@ def process_document_attachment(
         return f'<file name="{display_name}">\n{raw_text}\n</file>', [], None
 
     # 2. PDF-документ
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     try:
         total_pages = len(doc)
         if total_pages == 0:

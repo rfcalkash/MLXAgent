@@ -66,6 +66,7 @@ qt_add_qml_module(appclient
         icons/chevron.svg
         icons/trash.svg
         icons/stop.svg
+        icons/file.svg
 )
 
 

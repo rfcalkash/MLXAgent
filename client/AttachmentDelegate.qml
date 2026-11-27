@@ -4,6 +4,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import MlxClient
 import QtQuick.Controls.Material
+import QtQuick.Controls.impl
 
 Column{
     id: thumbnailRoot
@@ -20,10 +21,21 @@ Column{
         radius: 8
         clip: true
         
-        Image {
+        Item{
             anchors.fill: parent
-            source: attachmentData ? attachmentData.localUrl : ""
-            fillMode: Image.PreserveAspectCrop
+            Image {
+                id: imgId
+                visible: attachmentData && attachmentData.type === "image" && status!==Image.Error
+                anchors.fill: parent
+                source: attachmentData.localUrl
+                fillMode: Image.PreserveAspectCrop
+            }
+            IconImage{
+                visible: !imgId.visible
+                anchors.fill: parent
+                sourceSize: Qt.size(width, height)
+                source: "icons/file.svg"
+            }
         }
         
         // Кнопка удаления (появляется при наведении или тапе)

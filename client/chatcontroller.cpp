@@ -429,10 +429,12 @@ void ChatController::sendMessage(const QString& text)
                 readyAtts.prepend(QVariantMap {
                     { "type", map["mediaType"].toString() },
                     { "file_id", map["fileId"].toString() },
-                    { "url", map["remoteUrl"].toString() } });
+                    { "url", map["remoteUrl"].toString() },
+                    { "filename", QFileInfo(map["localPath"].toString()).fileName() } });
                 m_allDrafts.removeAt(i);
             }
         }
+
         if (targetChatId == m_activeChatId) {
             emit activeDraftAttachmentsChanged();
             m_chatModel->appendMessage({ .role = "user",
@@ -558,7 +560,9 @@ void ChatController::pollActiveTasks()
                 if (!toolCalls.isEmpty() && depth < MAX_TOOL_TURN_DEPTH) {
                     emit toolCallsRequested(chatId, toolCalls);
                 } else {
-                    markChatUnread(chatId);
+                    if (obj["error"].toString() != QLatin1String("Stopped by user")) {
+                        markChatUnread(chatId);
+                    }
                     fetchChats();
                     if (m_activeTasks.isEmpty()) {
                         emit generationFinished();

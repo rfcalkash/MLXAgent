@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import MlxClient
+import QtQuick.Controls.impl
 import QtQuick.Controls.Material
 
 ApplicationWindow {
@@ -42,10 +43,13 @@ ApplicationWindow {
 
     FileDialog {
         id: imagePicker
-        title: "Выберите изображение"
-        nameFilters: ["Изображения (*.png *.jpg *.jpeg *.webp)"]
+        title: "Выберите файл"
+        nameFilters: app.models.capabilities.includes("image")
+                     ? ["Все поддерживаемые (*.png *.jpg *.jpeg *.webp *.pdf *.txt *.md *.cpp *.h *.py *.qml *.json *.csv)", "Изображения (*.png *.jpg *.jpeg *.webp)", "Документы и код (*.pdf *.txt *.md *.cpp *.h *.py *.qml *.json)"]
+                     : ["Документы и код (*.pdf *.txt *.md *.cpp *.h *.py *.qml *.json *.csv *.log)", "Все файлы (*)"]
         onAccepted: app.chat.attachFile(selectedFile)
     }
+
 
     Dialog {
         id: errorDialog
@@ -263,11 +267,8 @@ ApplicationWindow {
 
                         Flow {
                             id: attachmentsFlow
-                            // Берем доступную ширину самого ScrollView, а не parent.width
-                            width: attachmentsContainer.availableWidth - Material.frameVerticalPadding * 2
-                            x: Material.frameVerticalPadding
-                            spacing: 8 // Рекомендуется добавить отступы между элементами
-
+                            Layout.fillWidth: true
+                            spacing: 6
                             Repeater {
                                 model: app.chat.activeDraftAttachments
                                 delegate: AttachmentDelegate {
@@ -276,6 +277,7 @@ ApplicationWindow {
                                 }
                             }
                         }
+
                     }
 
                     Item {
@@ -402,6 +404,13 @@ ApplicationWindow {
                     delegate: Item {
                         width: chatList.width
                         height: bubble.height
+                        Behavior on width { NumberAnimation { duration: 100 } }
+                        Behavior on height { NumberAnimation { duration: 100 } }
+                        // onHeightChanged: {
+                        //     if (index === chatList.count - 1) {
+                        //         chatList.positionViewAtEnd()
+                        //     }
+                        // }
                         required property int index
                         required property string role
                         required property string content
@@ -442,12 +451,33 @@ ApplicationWindow {
                                     spacing: 6
                                     Repeater {
                                         model: attachments
-                                        Image {
+                                        Item{
+                                            clip:true
                                             width: 140
                                             height: 140
-                                            fillMode: Image.PreserveAspectCrop
-                                            source: modelData.url || ""
-                                            asynchronous: true
+                                            Image {
+                                                id: docImage
+                                                anchors.fill: parent
+                                                fillMode: Image.PreserveAspectCrop
+                                                source: modelData.url || ""
+                                                asynchronous: true
+                                                visible: status !== Image.Error
+                                            }
+                                            IconImage{
+                                                anchors.fill: parent
+                                                visible: !docImage.visible
+                                                source: "icons/file.svg"
+                                                sourceSize: Qt.size(width,height)
+                                                color: Material.primaryTextColor
+                                                Label{
+                                                    anchors.fill: parent
+                                                    color: Material.primaryHighlightedTextColor
+                                                    text: modelData.filename || modelData.file_id || "Документ"
+                                                    elide: Text.ElideLeft
+                                                    wrapMode: Text.WrapAnywhere
+                                                    verticalAlignment: Text.AlignBottom
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -623,17 +653,19 @@ ApplicationWindow {
 
                 ChatButtons {
                     Layout.fillWidth: true
-                    canSend: chatText.text.length >0
                     sending: app.chat.isCurrentChatGenerating
+                    canSend: sending || ((app.models.serverStatus === "LOADED" || app.models.serverStatus === "GENERATING")
+                                         && (chatText.text.trim().length > 0 || app.chat.activeDraftAttachments.length > 0))
                     onSendClicked: {
-                        if(sending) app.chat.stopCurrentChat()
-                        else {
+                        if (sending) {
+                            app.chat.stopCurrentChat()
+                        } else {
                             app.chat.sendMessage(chatText.text)
                             chatText.text = ""
                         }
                     }
                     attachmentsCount: app.chat.activeDraftAttachments.length
-                    showAttachments: app.models.capabilities.includes("image")
+                    showAttachments: app.models.capabilities.includes("image") || app.models.capabilities.includes("document")
                     onAttachClicked: attachmentsDrawer.open()
                     Layout.margins: Material.frameVerticalPadding
                 }
